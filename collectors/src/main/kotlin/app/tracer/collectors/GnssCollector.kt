@@ -113,8 +113,7 @@ class GnssCollector @Inject constructor(
                     }
 
                     // Deprecated from API 33 but still the only status signal on Android 12/12L (minSdk 31).
-                    @Deprecated("Deprecated in Java")
-                    @Suppress("DEPRECATION")
+                    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
                     override fun onStatusChanged(status: Int) {
                         when (status) {
                             GnssMeasurementsEvent.Callback.STATUS_NOT_SUPPORTED -> ctx.status.degraded(id, "Raw GNSS measurements are not supported on this device.")
