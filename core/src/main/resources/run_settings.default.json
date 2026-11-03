@@ -1,0 +1,80 @@
+{
+    "location_interval_ms": 1000,
+    "use_fused_comparison": false,
+    "gnss_raw_measurements": false,
+    "cell_poll_interval_ms": 1000,
+    "wifi_scan_interval_ms": 30000,
+    "wifi_rtt_enabled": false,
+    "latency_interval_ms": 2000,
+    "adaptive_latency": true,
+    "throughput_interval_ms": 60000,
+    "throughput_bytes": 1000000,
+    "public_ip_interval_ms": 300000,
+    "device_interval_ms": 30000,
+    "motion_hz": 10,
+    "battery_saver": false,
+    "endpoints": [
+        {
+            "url": "https://1.1.1.1/cdn-cgi/trace",
+            "label": "Cloudflare",
+            "regional": false
+        },
+        {
+            "url": "https://dns.google/",
+            "label": "Google",
+            "regional": false
+        },
+        {
+            "url": "https://www.apple.com/library/test/success.html",
+            "label": "Apple",
+            "regional": false
+        },
+        {
+            "url": "https://www.etisalat.ae/",
+            "label": "Regional (e&)",
+            "regional": true
+        }
+    ],
+    "throughput_url": "https://speed.cloudflare.com/__down?bytes={bytes}",
+    "public_ip_url": "https://ipinfo.io/json",
+    "captive_url": "https://connectivitycheck.gstatic.com/generate_204",
+    "retention_days": 90,
+    "min_free_storage_mb": 500,
+    "thresholds": {
+        "gps_h_acc_m": 25.0,
+        "gps_jump_factor": 3.0,
+        "gps_jump_min_m": 30.0,
+        "gps_min_used_sats": 5,
+        "gps_recover_s": 10.0,
+        "latency_factor": 3.0,
+        "latency_min_ms": 150.0,
+        "latency_window": 30,
+        "dns_factor": 3.0,
+        "dns_min_ms": 100.0,
+        "throughput_drop_fraction": 0.6,
+        "throughput_min_samples": 3,
+        "signal_drop_db": 10,
+        "signal_drop_window_s": 5.0,
+        "overtake_db": 6,
+        "overtake_hold_s": 3.0,
+        "drop_consecutive_failures": 3,
+        "probe_timeout_ms": 3000,
+        "cell_stale_ms": 10000,
+        "min_event_spacing_s": 5.0,
+        "cell_edge_rsrp": -110,
+        "cell_edge_timing_advance": 25,
+        "good_rsrp": -95,
+        "good_sinr": 10,
+        "interference_sinr": 0,
+        "wifi_weak_rssi": -75,
+        "wifi_good_rssi": -65,
+        "sticky_delta_db": 10,
+        "channel_congestion_aps": 10,
+        "tunnel_cn0_drop_db": 8.0,
+        "tunnel_max_used_sats": 4,
+        "churn_handovers": 3,
+        "churn_window_s": 60.0,
+        "churn_min_speed_mps": 15.0,
+        "cause_lookback_s": 15.0
+    }
+}
