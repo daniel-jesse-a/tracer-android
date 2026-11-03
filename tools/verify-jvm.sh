@@ -23,6 +23,7 @@ EXTRA_MAIN=(
   collectors/src/main/kotlin/app/tracer/collectors/Mappings.kt
   collectors/src/main/kotlin/app/tracer/collectors/MotionAggregator.kt
   probes/src/main/kotlin/app/tracer/probes/ProbeLogic.kt
+  probes/src/main/kotlin/app/tracer/probes/InternalProbeLogic.kt
   probes/src/main/kotlin/app/tracer/probes/Sntp.kt
   probes/src/main/kotlin/app/tracer/probes/TowerCache.kt
   pairing/src/main/kotlin/app/tracer/pairing/SampleStamps.kt
@@ -34,6 +35,7 @@ EXTRA_TEST=(
   collectors/src/test/kotlin/app/tracer/collectors/MappingsTest.kt
   collectors/src/test/kotlin/app/tracer/collectors/MotionAggregatorTest.kt
   probes/src/test/kotlin/app/tracer/probes/ProbeLogicTest.kt
+  probes/src/test/kotlin/app/tracer/probes/InternalProbeLogicTest.kt
   probes/src/test/kotlin/app/tracer/probes/SntpTest.kt
   probes/src/test/kotlin/app/tracer/probes/TowerCacheTest.kt
   app/src/test/kotlin/app/tracer/run/SampleRestampTest.kt

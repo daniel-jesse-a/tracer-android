@@ -1,13 +1,17 @@
 package app.tracer.ui.live
 
+import android.os.SystemClock
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.tracer.core.analysis.Protocol
 import app.tracer.core.cell.CellNormalizer
 import app.tracer.core.model.CellSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.RunRecord
 import app.tracer.core.model.RunState
+import app.tracer.core.model.Stamp
+import app.tracer.core.model.Table
 import app.tracer.core.runtime.CollectorHealth
 import app.tracer.core.runtime.CollectorStatus
 import app.tracer.core.runtime.CollectorStatusBoard
@@ -72,6 +76,9 @@ data class LiveStats(
     val pollHz: Map<Int, Double> = emptyMap(),
 )
 
+/** A tapped waypoint waiting for its optional label; [tappedAt] is the stamp it is recorded with. */
+data class PendingWaypoint(val number: Int, val tappedAt: Stamp)
+
 /** An event opened in the detail sheet. [eventId] < 0 until the writer has persisted it. */
 data class SelectedEvent(val event: EventSample, val eventId: Long, val label: String?)
 
@@ -110,6 +117,10 @@ class LiveRunViewModel @Inject constructor(
         .filterNotNull()
         .distinctUntilChanged()
         .mapLatest { id -> runCatching { repository.getRun(id) }.getOrNull() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Protocol of the running run (fixed duration → countdown in the pill), or null for a free run. */
+    val protocol: StateFlow<Protocol?> = run.map { Protocol.byId(it?.protocol) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Collector problems worth a banner (throttled scans, missing permission, …). */
@@ -290,6 +301,52 @@ class LiveRunViewModel @Inject constructor(
     fun resume() = controller.resume()
     fun stop() = controller.stop()
     fun markMoment(text: String?) = controller.markMoment(text?.trim()?.ifBlank { null })
+
+    // ---------------------------------------------------------------- waypoints
+
+    private val _pendingWaypoint = MutableStateFlow<PendingWaypoint?>(null)
+    val pendingWaypoint: StateFlow<PendingWaypoint?> = _pendingWaypoint.asStateFlow()
+
+    /** Waypoints of the current run already sent (display numbering; the service assigns the stored seq). */
+    private var waypointsSent = 0
+    private var waypointRunId: String? = null
+
+    // Declared after the fields above: viewModelScope is Main.immediate, so this starts running here.
+    init {
+        viewModelScope.launch {
+            // seed display numbering from the stored waypoints (screen re-opened mid-run)
+            controller.runId.filterNotNull().distinctUntilChanged().collect { id ->
+                if (id != waypointRunId) {
+                    waypointRunId = id
+                    waypointsSent = runCatching { repository.counts(id)[Table.WAYPOINT]?.toInt() ?: 0 }.getOrDefault(0)
+                }
+            }
+        }
+    }
+
+    /**
+     * Mark: the waypoint's time is captured here, at the tap; the label sheet only adds text.
+     * A second tap while a label is pending commits the first one unlabeled.
+     */
+    fun tapWaypoint() {
+        val tappedAt = Stamp(System.currentTimeMillis(), SystemClock.elapsedRealtimeNanos())
+        _pendingWaypoint.value?.let { commitWaypoint(null) }
+        _pendingWaypoint.value = PendingWaypoint(waypointsSent + 1, tappedAt)
+    }
+
+    /** Save (label) or Skip / dismiss (null): records the pending waypoint with its tap time. */
+    fun commitWaypoint(label: String?) {
+        val p = _pendingWaypoint.value ?: return
+        _pendingWaypoint.value = null
+        controller.markWaypoint(label?.trim()?.ifBlank { null }, p.tappedAt)
+        waypointsSent = maxOf(waypointsSent, p.number)
+    }
+
+    override fun onCleared() {
+        // never drop a tapped waypoint because the screen went away mid-label
+        commitWaypoint(null)
+        super.onCleared()
+    }
 
     // ---------------------------------------------------------------- event sheet
 

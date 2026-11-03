@@ -11,7 +11,11 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyDisplayInfo
 import android.telephony.TelephonyManager
+import app.tracer.core.cell.CarrierSpec
+import app.tracer.core.cell.Carriers
 import app.tracer.core.cell.CellNormalizer
+import app.tracer.core.model.CarrierSample
+import app.tracer.core.model.CellSample
 import app.tracer.core.model.RadioSample
 import app.tracer.core.model.Sample
 import app.tracer.core.runtime.Collector
@@ -35,8 +39,9 @@ import javax.inject.Inject
 /**
  * [cellular] — per active subscription: serving + neighbour cells (CellSample via CellNormalizer)
  * from TelephonyCallback and periodic requestCellInfoUpdate, and RadioSample (RAT, NR state,
- * carrier aggregation) on display-info / service-state change and every 5 s. Re-registers on
- * SIM changes.
+ * carrier aggregation — via [Carriers.derive]) on display-info / service-state change and every 5 s,
+ * with CarrierSample rows (x_android_carrier) when the carrier list changes or every 30 s.
+ * Re-registers on SIM changes.
  */
 class CellularCollector @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -63,7 +68,8 @@ class CellularCollector @Inject constructor(
         val out: SendChannel<Sample> = channel
         val sessions = ConcurrentHashMap<Int, SubscriptionSession>()
 
-        fun emitCells(subId: Int, cells: List<CellInfo>) {
+        fun emitCells(session: SubscriptionSession, cells: List<CellInfo>) {
+            val subId = session.subId
             val stamp = ctx.clock.now()
             val nowMono = ctx.clock.now().tMonoNs
             // Primary serving cell first: the event engine treats the first serving row of a poll as
@@ -81,38 +87,76 @@ class CellularCollector @Inject constructor(
                 info.toRawCell()?.let { raw -> info to CellNormalizer.normalize(raw, ctx.runId, stamp, subId, nowMono) }
             }
             val primary = samples.firstOrNull { it.second.serving }?.second
-            for ((info, sample) in samples) {
+            val rows = samples.map { (info, sample) ->
                 val bogusServing = sample.serving && sample !== primary && primary != null &&
                     sample.rat == primary.rat && sample.cellId != null && sample.cellId == primary.cellId &&
                     info.cellConnectionStatus != CellInfo.CONNECTION_SECONDARY_SERVING
-                val row = if (bogusServing) sample.copy(serving = false) else sample
+                if (bogusServing) sample.copy(serving = false) else sample
+            }
+            // Last poll only (replaced, never accumulated): input to Carriers.derive for radio rows.
+            session.latestCells = rows
+            for (row in rows) {
                 if (!out.emitFromCallback(ctx, id, row)) return
             }
         }
 
-        fun radioSample(s: SubscriptionSession): RadioSample {
+        /**
+         * Emits a RadioSample with 5G state / carriers derived by [Carriers.derive] from the display
+         * RAT, ServiceState.getCellBandwidths() and the latest normalized cells of this subscription,
+         * plus one CarrierSample per component carrier — the latter only when the carrier list changed
+         * since the last emission or [CARRIER_REFRESH_MS] passed (keeps multi-hour runs lean).
+         * Runs on the worker thread (all callers do).
+         */
+        fun emitRadio(s: SubscriptionSession) {
             val display = s.displayInfo
             val networkType = display?.networkType
                 ?: s.dataNetworkType.takeIf { it != TelephonyManager.NETWORK_TYPE_UNKNOWN }
                 ?: frameworkCall { s.tm.dataNetworkType }
                 ?: TelephonyManager.NETWORK_TYPE_UNKNOWN
-            val rat = ratOf(display?.overrideNetworkType ?: TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE, networkType)
-            val service = s.serviceState
-            return RadioSample(
+            val displayRat = ratOf(display?.overrideNetworkType ?: TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE, networkType)
+            val bandwidths = s.serviceState?.let { st -> frameworkCall { st.cellBandwidths.toList() } }.orEmpty()
+            val derived = Carriers.derive(displayRat, bandwidths, s.latestCells)
+            val stamp = ctx.clock.now()
+            val radio = RadioSample(
                 runId = ctx.runId,
-                stamp = ctx.clock.now(),
+                stamp = stamp,
                 serviceId = s.subId.toString(),
-                rat = rat,
-                nrState = parseNrState(service?.toString()),
-                carrierAggregation = service?.let { CellNormalizer.carrierAggregationJson(it.cellBandwidths.toList(), rat) },
+                rat = derived.rat,
+                nrState = derived.nrState,
+                carrierAggregation = derived.carrierAggregationJson,
             )
+            if (!out.emitFromCallback(ctx, id, radio)) return
+            val nowMs = SystemClock.elapsedRealtime()
+            val changed = derived.carriers != s.lastCarriers
+            if (!changed && nowMs - s.lastCarriersMonoMs < CARRIER_REFRESH_MS) return
+            s.lastCarriers = derived.carriers
+            s.lastCarriersMonoMs = nowMs
+            for (c in derived.carriers) {
+                val row = CarrierSample(
+                    runId = ctx.runId,
+                    stamp = stamp,
+                    serviceId = s.subId.toString(),
+                    index = c.index,
+                    rat = c.rat,
+                    band = c.band,
+                    arfcn = c.arfcn,
+                    pci = c.pci,
+                    bandwidthMhz = c.bandwidthMhz,
+                    primary = c.primary,
+                    source = c.source,
+                )
+                if (!out.emitFromCallback(ctx, id, row)) {
+                    s.lastCarriers = null // paused / closed mid-list: re-emit next time
+                    return
+                }
+            }
         }
 
         fun requestUpdate(s: SubscriptionSession) {
             s.lastRequestMonoMs = SystemClock.elapsedRealtime()
             frameworkCall({ ctx.status.degraded(id, "Cell info refresh refused: ${it.message}") }) {
                 s.tm.requestCellInfoUpdate(worker.executor, object : TelephonyManager.CellInfoCallback() {
-                    override fun onCellInfo(cellInfo: MutableList<CellInfo>) = emitCells(s.subId, cellInfo)
+                    override fun onCellInfo(cellInfo: MutableList<CellInfo>) = emitCells(s, cellInfo)
                     override fun onError(errorCode: Int, detail: Throwable?) {
                         // Modem busy / timeout: the next poll retries; cached CellInfoListener rows still flow.
                     }
@@ -121,10 +165,8 @@ class CellularCollector @Inject constructor(
         }
 
         val listeners = object : SessionListener {
-            override fun onCells(session: SubscriptionSession, cells: List<CellInfo>) = emitCells(session.subId, cells)
-            override fun onRadioChanged(session: SubscriptionSession) {
-                out.emitFromCallback(ctx, id, radioSample(session))
-            }
+            override fun onCells(session: SubscriptionSession, cells: List<CellInfo>) = emitCells(session, cells)
+            override fun onRadioChanged(session: SubscriptionSession) = emitRadio(session)
             override fun onSignalChanged(session: SubscriptionSession) {
                 // Signal moved: refresh cell measurements sooner than the poll if the last request is old.
                 val half = settings.cellPollIntervalMs / 2
@@ -183,7 +225,7 @@ class CellularCollector @Inject constructor(
             while (isActive) {
                 delay(5_000L)
                 ctx.signals.awaitResumed()
-                sessions.values.forEach { s -> worker.handler.post { out.emitFromCallback(ctx, id, radioSample(s)) } }
+                sessions.values.forEach { s -> worker.handler.post { emitRadio(s) } }
             }
         }
 
@@ -194,6 +236,11 @@ class CellularCollector @Inject constructor(
             worker.quit()
         }
     }.buffer(512)
+
+    private companion object {
+        /** CarrierSamples are re-emitted at least this often even when the carrier list is unchanged. */
+        const val CARRIER_REFRESH_MS = 30_000L
+    }
 }
 
 private interface SessionListener {
@@ -218,6 +265,11 @@ private class SubscriptionSession(
     @Volatile var serviceState: ServiceState? = null
     @Volatile var dataNetworkType: Int = TelephonyManager.NETWORK_TYPE_UNKNOWN
     @Volatile var lastRequestMonoMs: Long = 0L
+    /** Normalized cells of the last poll (replaced each poll — bounded). */
+    @Volatile var latestCells: List<CellSample> = emptyList()
+    /** Carrier list of the last CarrierSample emission (worker thread only). */
+    var lastCarriers: List<CarrierSpec>? = null
+    var lastCarriersMonoMs: Long = 0L
 
     override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) = listener.onCells(this, cellInfo)
 

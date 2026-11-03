@@ -16,8 +16,11 @@ import androidx.lifecycle.LifecycleService
 import app.tracer.BuildConfig
 import app.tracer.R
 import app.tracer.core.analysis.Completeness
+import app.tracer.core.analysis.Method
+import app.tracer.core.analysis.Protocol
 import app.tracer.core.config.RunSettings
 import app.tracer.core.model.AnnotationSample
+import app.tracer.core.model.CollectorLogSample
 import app.tracer.core.model.DeviceSample
 import app.tracer.core.model.GapSample
 import app.tracer.core.model.LocationSample
@@ -30,6 +33,7 @@ import app.tracer.core.model.Sample
 import app.tracer.core.model.Stamp
 import app.tracer.core.model.Table
 import app.tracer.core.model.TracerClock
+import app.tracer.core.model.WaypointSample
 import app.tracer.core.model.WifiScanSample
 import app.tracer.core.pairing.ClockAlignment
 import app.tracer.core.runtime.Collector
@@ -46,6 +50,7 @@ import app.tracer.core.runtime.SampleSink
 import app.tracer.core.sim.Scenarios
 import app.tracer.core.sim.SyntheticRun
 import app.tracer.events.EventEngine
+import app.tracer.events.RoamTracker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -62,6 +67,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 
@@ -73,7 +82,7 @@ import javax.inject.Inject
  *    [commandLock]. All [Session] bookkeeping fields are touched only from these commands and
  *    from the main-thread loops.
  *  - Samples arrive on Dispatchers.Default (collectors / simulator) and go through [onSample],
- *    serialised by [sampleLock], which also guards [aggregator] and the EventEngine.
+ *    serialised by [sampleLock], which also guards [aggregator], the EventEngine and the RoamTracker.
  *  - Lock order: commandLock → sampleLock (never the reverse).
  */
 @AndroidEntryPoint
@@ -110,13 +119,21 @@ class RunService : LifecycleService() {
 
     private class Session(
         val run: RunRecord,
-        /** As configured by the user (raw, battery-saver flag intact) — used for completeness. */
+        /** As configured by the user, or the protocol's frozen settings (raw, battery-saver flag intact) — used for completeness. */
         val settings: RunSettings,
         val scenario: String?,
         val engine: EventEngine,
         val startedMonoNs: Long,
         @Volatile var ctx: CollectorContext,
+        /** Fixed-duration protocol of this run (auto-stop after [Protocol.durationS] of recorded time), or null. */
+        val protocol: Protocol? = null,
     ) {
+        /** Wi-Fi roam records; fed every sample in [onSample] under sampleLock. */
+        val roams = RoamTracker(run.runId)
+        /** Last waypoint seq written (per run, 1-based); seeded from the table on recovery. */
+        var waypointSeq = 0
+        /** Set once the protocol auto-stop was queued, so the tick loop requests it only once. */
+        var autoStopQueued = false
         /** Set once the battery fell to ≤ 15 % and battery-saver intervals were forced on. */
         @Volatile var lowBatterySaver = false
         val jobs = HashMap<Collector, Job>()
@@ -154,8 +171,10 @@ class RunService : LifecycleService() {
                 val settings = intent?.getStringExtra(EXTRA_SETTINGS_JSON)
                     ?.let { runCatching { RunSettings.fromJson(it) }.getOrNull() } ?: RunSettings()
                 val scenario = intent?.getStringExtra(EXTRA_SCENARIO)?.takeIf { it in Scenarios.names }
+                val site = intent?.getStringExtra(EXTRA_SITE)?.trim()?.takeIf { it.isNotEmpty() }
+                val protocolId = intent?.getStringExtra(EXTRA_PROTOCOL)
                 command {
-                    if (promoted) startLocked(name, mode, settings, scenario)
+                    if (promoted) startLocked(name, mode, settings, scenario, site, protocolId)
                     else failStartLocked(R.string.alert_start_failed)
                 }
             }
@@ -171,6 +190,13 @@ class RunService : LifecycleService() {
                 val text = intent?.getStringExtra(EXTRA_TEXT)
                 val audio = intent?.getStringExtra(EXTRA_AUDIO_PATH)
                 command { markLocked(text, audio) }
+            }
+            ACTION_WAYPOINT -> {
+                val label = intent?.getStringExtra(EXTRA_LABEL)
+                val utc = intent?.getLongExtra(EXTRA_TAP_UTC_MS, 0L) ?: 0L
+                val mono = intent?.getLongExtra(EXTRA_TAP_MONO_NS, 0L) ?: 0L
+                val tappedAt = if (utc > 0L && mono > 0L) Stamp(utc, mono) else null
+                command { waypointLocked(label, tappedAt) }
             }
             else -> command { if (session == null) stopIfIdle() }
         }
@@ -201,14 +227,26 @@ class RunService : LifecycleService() {
         scope.launch { commandLock.withLock { block() } }
     }
 
-    private suspend fun startLocked(name: String, mode: String, settings: RunSettings, scenario: String?) {
+    private suspend fun startLocked(
+        name: String, mode: String, userSettings: RunSettings, scenario: String?, site: String?, protocolId: String?,
+    ) {
         session?.let { s -> // already running: re-publish so the caller's PREFLIGHT state resolves
             facade.publishRunId(s.run.runId); facade.publishState(s.state); return
         }
+        val protocol = Protocol.byId(protocolId)
+        if (protocolId != null && protocol == null) Log.w(TAG, "unknown protocol '$protocolId' — starting a free run")
+        val settings = protocol?.let { protocolSettings(it, userSettings) } ?: userSettings
         val now = clock.now()
+        val zone = ZoneId.systemDefault()
+        val testNumber = site?.let { st ->
+            try { repository.nextTestNumber(st) } catch (e: CancellationException) { throw e } catch (t: Throwable) { Log.w(TAG, "nextTestNumber failed", t); 1 }
+        }
+        val runName = if (site != null && testNumber != null) {
+            RunRecord.displayName(site, testNumber, Instant.ofEpochMilli(now.tUtcMs).atZone(zone).format(DISPLAY_TIME))
+        } else name
         val run = RunRecord(
             runId = UUID.randomUUID().toString(),
-            name = name,
+            name = runName,
             mode = if (scenario != null) "simulated" else mode,
             devicePlatform = "android",
             deviceModel = Build.MODEL,
@@ -218,6 +256,11 @@ class RunService : LifecycleService() {
             settingsJson = settings.toJson().toString(),
             tUtcMs = now.tUtcMs,
             tMonoNs = now.tMonoNs,
+            site = site,
+            testNumber = testNumber,
+            protocol = protocol?.id,
+            timeZone = zone.id,
+            methodFingerprint = Method.fingerprint(settings, protocol?.id),
         )
         try {
             repository.createRun(run)
@@ -228,10 +271,22 @@ class RunService : LifecycleService() {
             failStartLocked(R.string.alert_start_failed)
             return
         }
-        val s = newSession(run, settings, scenario, now.tMonoNs)
+        val s = newSession(run, settings, scenario, now.tMonoNs, protocol)
         beginSession(s)
         launchNtp(s)
     }
+
+    /**
+     * The protocol's frozen settings. Only fields that do not change *what* is measured (and are not
+     * part of [Method.fingerprint]) are carried over from the user's settings: OpenCelliD key,
+     * upload URL, retention and the free-storage floor.
+     */
+    private fun protocolSettings(p: Protocol, user: RunSettings): RunSettings = p.settings().copy(
+        openCellIdKey = user.openCellIdKey,
+        uploadUrl = user.uploadUrl,
+        retentionDays = user.retentionDays,
+        minFreeStorageMb = user.minFreeStorageMb,
+    )
 
     private fun failStartLocked(@StringRes alert: Int) {
         notifications.post(RunNotifications.ID_ALERT, notifications.alert(getString(alert)))
@@ -256,7 +311,9 @@ class RunService : LifecycleService() {
         val startedMono = if (!rebooted && hb.startedMonoNs > 0 && hb.startedMonoNs <= now.tMonoNs) hb.startedMonoNs
         else now.tMonoNs - (now.tUtcMs - run.startedAt).coerceAtLeast(0) * 1_000_000L
 
-        val s = newSession(run, settings, hb.scenario?.takeIf { it in Scenarios.names }, startedMono)
+        val protocol = Protocol.byId(hb.protocolId ?: run.protocol)
+        val s = newSession(run, settings, hb.scenario?.takeIf { it in Scenarios.names }, startedMono, protocol)
+        s.waypointSeq = runCatching { repository.counts(run.runId)[Table.WAYPOINT]?.toInt() ?: 0 }.getOrDefault(0)
         s.pausedMsTotal = hb.pausedMsTotal
         s.gapMsTotal = hb.gapMsTotal
         if (hb.paused) {
@@ -333,6 +390,30 @@ class RunService : LifecycleService() {
         onSample(s, AnnotationSample(s.run.runId, clock.now(), text, audioPath))
     }
 
+    /**
+     * Tap-to-mark: stamped with the tap time; position = the aggregator's latest fix (any provider)
+     * at the moment the command is processed (milliseconds after the tap).
+     */
+    private suspend fun waypointLocked(label: String?, tappedAt: Stamp?) {
+        val s = session ?: return stopIfIdle()
+        if (s.state == RunState.STOPPING) return
+        val loc = sampleLock.withLock { aggregator.snapshot.location }
+        s.waypointSeq += 1
+        onSample(
+            s,
+            WaypointSample(
+                runId = s.run.runId,
+                stamp = tappedAt ?: clock.now(),
+                seq = s.waypointSeq,
+                label = label?.trim()?.takeIf { it.isNotEmpty() },
+                lat = loc?.lat,
+                lon = loc?.lon,
+                hAccM = loc?.hAccM,
+                provider = loc?.provider,
+            ),
+        )
+    }
+
     private suspend fun stopLocked() {
         val s = session ?: return stopIfIdle()
         val wasPaused = s.state == RunState.PAUSED
@@ -353,6 +434,7 @@ class RunService : LifecycleService() {
             }
             sampleLock.withLock {
                 for (e in s.engine.finish()) { sink.emit(e); aggregator.onSample(e) }
+                for (r in s.roams.finish()) { sink.emit(r); aggregator.onSample(r) }
                 sink.flush()
             }
             finalizeRecord(s, now.tUtcMs)
@@ -387,10 +469,13 @@ class RunService : LifecycleService() {
 
     // ------------------------------------------------------------------ session plumbing
 
-    private fun newSession(run: RunRecord, settings: RunSettings, scenario: String?, startedMonoNs: Long): Session {
+    private fun newSession(run: RunRecord, settings: RunSettings, scenario: String?, startedMonoNs: Long, protocol: Protocol?): Session {
         // Collectors receive the already-effective settings with batterySaver cleared, so calling
         // effective() again on their side is a no-op (never double-multiplied).
-        return Session(run, settings, scenario, EventEngine(run.runId, settings.thresholds), startedMonoNs, collectorContext(run.runId, settings))
+        return Session(
+            run, settings, scenario, EventEngine(run.runId, settings.thresholds), startedMonoNs,
+            collectorContext(run.runId, settings), protocol,
+        )
     }
 
     private fun collectorContext(runId: String, settings: RunSettings): CollectorContext =
@@ -509,7 +594,10 @@ class RunService : LifecycleService() {
         }
     }
 
-    /** Single writer path: sink → live aggregator → event engine (→ sink/aggregator) → signals. */
+    /**
+     * Single writer path: sink → live aggregator → event engine (→ sink/aggregator) → roam tracker
+     * (→ sink/aggregator) → signals. Real and simulated runs both come through here.
+     */
     private suspend fun onSample(s: Session, sample: Sample) {
         sampleLock.withLock {
             if (session !== s) return
@@ -519,6 +607,10 @@ class RunService : LifecycleService() {
                 sink.emit(e)
                 aggregator.onSample(e)
             }
+            for (r in s.roams.onSample(sample)) {
+                sink.emit(r)
+                aggregator.onSample(r)
+            }
             updateSignals(sample)
             if (sample is DeviceSample) checkLowBattery(s, sample)
         }
@@ -526,8 +618,9 @@ class RunService : LifecycleService() {
 
     /**
      * Persists collector health transitions (unavailable / degraded / restarted / recovered) as
-     * annotations "collector:<id> <health> — <message>", so an exported bundle explains *why* a
-     * table is empty or sparse (e.g. permission missing, GNSS engine stopped, scan throttling).
+     * x_collector_log rows (collector, health, message, restarts) — kept out of the user's
+     * annotations — so an exported bundle explains *why* a table is empty or sparse (permission
+     * missing, GNSS engine stopped, scan throttling).
      */
     private suspend fun recordCollectorHealth(s: Session) {
         val last = HashMap<String, Triple<CollectorHealth, String?, Int>>()
@@ -542,12 +635,7 @@ class RunService : LifecycleService() {
                 val restarted = prev != null && st.restarts > prev.third
                 if (prev == null && (st.health == CollectorHealth.OK || st.health == CollectorHealth.DISABLED)) continue // normal start / user-disabled, not news
                 if (!changedHealth && !restarted) continue
-                val text = buildString {
-                    append("collector:").append(id).append(' ').append(st.health.name.lowercase())
-                    if (restarted) append(" restart#").append(st.restarts)
-                    st.message?.let { append(" — ").append(it) }
-                }
-                onSample(s, AnnotationSample(s.run.runId, clock.now(), text, null))
+                onSample(s, CollectorLogSample(s.run.runId, clock.now(), id, st.health.name.lowercase(), st.message, st.restarts))
             }
         }
     }
@@ -598,6 +686,24 @@ class RunService : LifecycleService() {
             aggregator.tick(now.tMonoNs, pausedMs, gpsOffset)
             facade.publishLive(aggregator.snapshot)
         }
+        val remaining = protocolRemainingMs(s, now) ?: return
+        if (remaining <= 0L && s.state == RunState.RECORDING && !s.autoStopQueued) {
+            s.autoStopQueued = true
+            Log.i(TAG, "protocol ${s.protocol?.id} complete — stopping run ${s.run.runId}")
+            command { if (session === s && s.state == RunState.RECORDING) stopLocked() }
+        }
+    }
+
+    /** Recorded (un-paused, gap-free) time of [s]. */
+    private fun recordedMs(s: Session, now: Stamp): Long {
+        val pausedMs = s.pausedMsTotal + if (s.state == RunState.PAUSED) pauseDurationMs(s, now) else 0L
+        return ((now.tMonoNs - s.startedMonoNs) / 1_000_000L - pausedMs).coerceAtLeast(0L)
+    }
+
+    /** Protocol time left (recorded time; pauses and restarts do not count), or null for a free run. */
+    private fun protocolRemainingMs(s: Session, now: Stamp): Long? {
+        val p = s.protocol ?: return null
+        return p.durationS * 1_000L - recordedMs(s, now)
     }
 
     private fun watchdog(s: Session) {
@@ -652,6 +758,8 @@ class RunService : LifecycleService() {
                 pausedAtMonoNs = s.pausedAtMonoNs,
                 pausedMsTotal = s.pausedMsTotal,
                 gapMsTotal = s.gapMsTotal,
+                protocolId = s.protocol?.id,
+                protocolEndUtcMs = protocolRemainingMs(s, now)?.let { now.tUtcMs + it.coerceAtLeast(0L) } ?: 0L,
             ),
         )
     }
@@ -659,24 +767,51 @@ class RunService : LifecycleService() {
     private fun updateNotification() {
         val s = session ?: return
         if (!foreground) return
-        notifications.post(RunNotifications.ID_RUNNING, notifications.running(facade.live.value, paused = s.state == RunState.PAUSED))
+        val protocol = s.protocol?.let { p -> p.id to (protocolRemainingMs(s, clock.now()) ?: 0L).coerceAtLeast(0L) }
+        notifications.post(
+            RunNotifications.ID_RUNNING,
+            notifications.running(facade.live.value, paused = s.state == RunState.PAUSED, protocol = protocol),
+        )
     }
 
     // ------------------------------------------------------------------ finalisation
 
+    /**
+     * Completeness + GPS offsets. Bounded memory for multi-hour runs: tables are streamed page by
+     * page ([RunRepository.stream]) and folded into counters; only the first/last
+     * [GPS_OFFSET_FIXES] GNSS-timed fixes are kept for the offset medians.
+     */
     private suspend fun finalizeRecord(s: Session, endUtcMs: Long) {
         val runId = s.run.runId
-        val locations = repository.samples(runId, Table.LOCATION).filterIsInstance<LocationSample>()
         val counts = repository.counts(runId)
-        val wifiScans = repository.samples(runId, Table.WIFI_SCAN).filterIsInstance<WifiScanSample>().map { it.scanId }.distinct().size.toLong()
-        val latencyProbes = repository.samples(runId, Table.PROBE).count { it is ProbeSample && it.probeType == "latency" }.toLong()
+
+        val locationSeconds = HashSet<Long>() // ≤ one entry per recorded second
+        val firstGps = ArrayList<LocationSample>(GPS_OFFSET_FIXES)
+        val lastGps = ArrayDeque<LocationSample>(GPS_OFFSET_FIXES + 1)
+        repository.stream(runId, Table.LOCATION).collect { l ->
+            if (l !is LocationSample) return@collect
+            locationSeconds += l.stamp.tMonoNs / 1_000_000_000L
+            if ((l.gpsTimeMs ?: l.stamp.gpsTimeMs) != null) {
+                if (firstGps.size < GPS_OFFSET_FIXES) firstGps += l
+                lastGps.addLast(l)
+                if (lastGps.size > GPS_OFFSET_FIXES) lastGps.removeFirst()
+            }
+        }
+        val scanIds = HashSet<Long>() // one entry per scan (~2/min)
+        if ((counts[Table.WIFI_SCAN] ?: 0L) > 0L) {
+            repository.stream(runId, Table.WIFI_SCAN).collect { if (it is WifiScanSample) scanIds += it.scanId }
+        }
+        var latencyProbes = 0L
+        if ((counts[Table.PROBE] ?: 0L) > 0L) {
+            repository.stream(runId, Table.PROBE).collect { if (it is ProbeSample && it.probeType == "latency") latencyProbes++ }
+        }
         val observed = mapOf(
             // positions from any provider (raw GPS or fused indoors); GNSS health is scored by gnss_epochs
-            "location" to locations.map { it.stamp.tMonoNs / 1_000_000_000L }.distinct().size.toLong(),
+            "location" to locationSeconds.size.toLong(),
             // ~10 satellites per epoch; avoids loading every satellite row of a long run
             "gnss_epochs" to (counts[Table.GNSS_SATELLITE] ?: 0L) / GNSS_ROWS_PER_EPOCH,
             "cell_serving_polls" to (counts[Table.CELL_SERVING] ?: 0L),
-            "wifi_scans" to wifiScans,
+            "wifi_scans" to scanIds.size.toLong(),
             "latency_probes" to latencyProbes,
             "device" to (counts[Table.DEVICE] ?: 0L),
             "motion" to (counts[Table.MOTION] ?: 0L),
@@ -689,8 +824,8 @@ class RunService : LifecycleService() {
         repository.updateRun(
             latest.copy(
                 endedAt = endUtcMs,
-                gpsOffsetMsStart = ClockAlignment.gpsOffsetMs(locations, 30, fromEnd = false),
-                gpsOffsetMsEnd = ClockAlignment.gpsOffsetMs(locations, 30, fromEnd = true),
+                gpsOffsetMsStart = ClockAlignment.gpsOffsetMs(firstGps, GPS_OFFSET_FIXES, fromEnd = false),
+                gpsOffsetMsEnd = ClockAlignment.gpsOffsetMs(lastGps.toList(), GPS_OFFSET_FIXES, fromEnd = true),
                 ntpOffsetMs = s.ntpOffsetMs ?: latest.ntpOffsetMs,
                 completenessJson = completeness.toJson(),
             ),
@@ -741,12 +876,18 @@ class RunService : LifecycleService() {
         const val ACTION_STOP = "app.tracer.run.STOP"
         const val ACTION_MARK = "app.tracer.run.MARK"
         const val ACTION_RESUME_AFTER_DEATH = "app.tracer.run.RESUME_AFTER_DEATH"
+        const val ACTION_WAYPOINT = "app.tracer.run.WAYPOINT"
         const val EXTRA_NAME = "name"
         const val EXTRA_MODE = "mode"
         const val EXTRA_SETTINGS_JSON = "settings_json"
         const val EXTRA_SCENARIO = "scenario"
         const val EXTRA_TEXT = "text"
         const val EXTRA_AUDIO_PATH = "audio_path"
+        const val EXTRA_SITE = "site"
+        const val EXTRA_PROTOCOL = "protocol_id"
+        const val EXTRA_LABEL = "label"
+        const val EXTRA_TAP_UTC_MS = "tap_utc_ms"
+        const val EXTRA_TAP_MONO_NS = "tap_mono_ns"
 
         private const val TICK_MS = 1_000L
         private const val NOTIFICATION_MS = 2_000L
@@ -763,6 +904,8 @@ class RunService : LifecycleService() {
         private const val DEGRADED_LATENCY_FACTOR = 3.0
         private const val GNSS_ROWS_PER_EPOCH = 10L
         private const val LOW_BATTERY_FRACTION = 0.15
+        private const val GPS_OFFSET_FIXES = 30
+        private val DISPLAY_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
 
         fun intent(context: Context, action: String): Intent = Intent(context, RunService::class.java).setAction(action)
     }

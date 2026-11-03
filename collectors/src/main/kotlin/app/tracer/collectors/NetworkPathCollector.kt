@@ -116,7 +116,9 @@ class NetworkPathCollector @Inject constructor(
                 notMetered = c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
                 downKbps = down,
                 upKbps = c.linkUpstreamBandwidthKbps,
-                iface = lp?.interfaceName,
+                // transport name (wifi | cellular | ethernet | vpn), as in probe.interface; kernel name in ifname
+                iface = transportNameOf(transports),
+                ifname = lp?.interfaceName,
                 dnsServers = lp?.dnsServers?.mapNotNull { it.hostAddress }?.joinToString(","),
                 privateDns = lp?.privateDnsServerName,
             )

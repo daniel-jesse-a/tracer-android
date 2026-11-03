@@ -36,14 +36,19 @@ internal class RunNotifications(private val context: Context) {
         )
     }
 
-    fun running(live: LiveSnapshot, paused: Boolean): Notification {
+    /**
+     * @param protocol (protocol id, recorded time left in ms) for a protocol run → first line
+     *        "Protocol walk10-dual · 06:12 left"; null for a free run.
+     */
+    fun running(live: LiveSnapshot, paused: Boolean, protocol: Pair<String, Long>? = null): Notification {
         val dash = context.getString(R.string.notif_dash)
         val rsrp = live.primaryServing?.rsrp?.toString() ?: dash
         val latency = live.latencyMs?.roundToInt()?.toString() ?: dash
-        val text = context.getString(
+        val stats = context.getString(
             R.string.notif_text,
             live.transport ?: dash, live.rat ?: dash, rsrp, latency, live.eventCount,
         )
+        val text = protocol?.let { (id, leftMs) -> context.getString(R.string.notif_protocol, id, formatRemaining(leftMs)) + "\n" + stats } ?: stats
         val elapsed = formatHms(live.elapsedMs)
         val title = if (paused) context.getString(R.string.notif_title_paused, elapsed) else elapsed
 
@@ -57,7 +62,7 @@ internal class RunNotifications(private val context: Context) {
         return NotificationCompat.Builder(context, CHANNEL_RUN)
             .setSmallIcon(R.drawable.ic_stat_tracer)
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText(text.substringBefore('\n'))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -114,6 +119,13 @@ internal class RunNotifications(private val context: Context) {
         private const val REQ_RESUME = 2
         private const val REQ_STOP = 3
         private const val REQ_OPEN = 4
+
+        /** "06:12" under an hour, "1:54:12" above. */
+        fun formatRemaining(ms: Long): String {
+            val total = (ms.coerceAtLeast(0) + 999) / 1000 // round up: never show 00:00 while still running
+            return if (total >= 3600) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+            else String.format(java.util.Locale.ROOT, "%02d:%02d", total / 60, total % 60)
+        }
 
         fun formatHms(ms: Long): String {
             val total = (ms.coerceAtLeast(0) / 1000)

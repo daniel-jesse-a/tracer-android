@@ -11,6 +11,8 @@
     <string name="notif_dash">—</string>
     <!-- transport · RAT · RSRP · latency · event count -->
     <string name="notif_text">%1$s · %2$s · RSRP %3$s dBm · %4$s ms · %5$d events</string>
+    <!-- protocol id · time left, e.g. "Protocol walk10-dual · 06:12 left" -->
+    <string name="notif_protocol">Protocol %1$s · %2$s left</string>
     <string name="notif_title_paused">%1$s · Paused</string>
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>

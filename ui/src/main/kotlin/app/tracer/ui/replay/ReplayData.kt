@@ -8,6 +8,8 @@ import app.tracer.core.model.ProbeSample
 import app.tracer.core.model.RadioSample
 import app.tracer.core.model.RunRecord
 import app.tracer.core.model.Sample
+import app.tracer.core.model.WaypointSample
+import app.tracer.core.model.WifiRoamSample
 import app.tracer.core.model.WifiConnectionSample
 import app.tracer.core.quality.ConnType
 import app.tracer.core.util.Stats
@@ -49,10 +51,31 @@ class ReplayData(
     val labels: Map<Long, String>,
     val markers: List<EventMarker>,
     val linkedName: String?,
-)
+    /** user waypoints, ascending seq */
+    val waypoints: List<WaypointSample> = emptyList(),
+    /** Wi-Fi roams (wifi_roam rows), ascending time */
+    val roams: List<WifiRoamSample> = emptyList(),
+) {
+    /** Map pins for [waypoints] with a position (ids are negative: −seq, never clash with event rowids). */
+    val waypointMarkers: List<EventMarker> get() = waypoints.mapNotNull { w ->
+        val la = w.lat; val lo = w.lon
+        if (la != null && lo != null) EventMarker(ReplayBuilder.waypointMarkerId(w.seq), la, lo, ReplayBuilder.WAYPOINT_SEVERITY, w.label ?: "#${w.seq}") else null
+    }
+}
 
 /** Pure helpers that turn sample lists into lanes. */
 object ReplayBuilder {
+
+    /** EventMarker.severity used for waypoint pins (drawn in the info colour by both map backends). */
+    const val WAYPOINT_SEVERITY = "waypoint"
+
+    fun waypointMarkerId(seq: Int): Long = -seq.toLong().coerceAtLeast(1L)
+
+    /** seq of a waypoint pin id, or null for an event rowid. */
+    fun waypointSeqOf(markerId: Long): Int? = if (markerId < 0) (-markerId).toInt() else null
+
+    /** "aa:bb:cc:dd:ee:ff" → "ee:ff" (enough to tell APs of one SSID apart). */
+    fun bssidTail(bssid: String?): String = bssid?.takeLast(5) ?: "—"
 
     /** TYPE: ConnType.of(rat, primaryInterface) at every change of either stream. */
     fun connType(radio: List<RadioSample>, paths: List<NetworkPathSample>): CatData {

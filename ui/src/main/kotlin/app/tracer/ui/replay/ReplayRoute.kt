@@ -1,5 +1,6 @@
 package app.tracer.ui.replay
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -51,6 +53,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.tracer.core.model.WaypointSample
+import app.tracer.core.model.WifiRoamSample
 import app.tracer.ui.R
 import app.tracer.ui.components.chart.ChartSeries
 import app.tracer.ui.components.chart.NumericSeries
@@ -100,6 +104,7 @@ fun ReplayRoute(runId: String, atMonoNs: Long?, onBack: () -> Unit, onWorstSegme
     val speed by vm.speed.collectAsStateWithLifecycle()
     val layer by vm.layer.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
+    val waypoint by vm.waypoint.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var menu by remember { mutableStateOf(false) }
 
@@ -153,6 +158,7 @@ fun ReplayRoute(runId: String, atMonoNs: Long?, onBack: () -> Unit, onWorstSegme
                     onLayer = vm::setLayer, onScrub = vm::scrub, onTogglePlay = vm::togglePlay,
                     onSpeed = vm::setSpeed, onPrev = vm::prevEvent, onNext = vm::nextEvent,
                     onEventId = vm::openEvent, onEventIndex = vm::openEventIndex,
+                    waypoint = waypoint, onWaypointIndex = vm::openWaypointIndex, onCloseWaypoint = vm::closeWaypoint,
                 )
             }
         }
@@ -199,19 +205,23 @@ private fun ReplayContent(
     d: ReplayData, cursor: Long, mapCursorNs: Long, playing: Boolean, speed: Int, layer: MapLayer, rerunning: Boolean, selectedId: Long?,
     onLayer: (MapLayer) -> Unit, onScrub: (Long) -> Unit, onTogglePlay: () -> Unit, onSpeed: (Int) -> Unit,
     onPrev: () -> Unit, onNext: () -> Unit, onEventId: (Long) -> Unit, onEventIndex: (Int) -> Unit,
+    waypoint: WaypointSample?, onWaypointIndex: (Int) -> Unit, onCloseWaypoint: () -> Unit,
 ) {
     val series = rememberReplaySeries(d, laneText())
     val ticks = remember(d) { d.events.map { it.second.stamp.tMonoNs to it.second.severity } }
+    val waypointTicks = remember(d) { d.waypoints.map { it.stamp.tMonoNs } }
+    val pins = remember(d) { d.markers + d.waypointMarkers }
     val mapCursor = remember(d, mapCursorNs) { pointAt(d.points, mapCursorNs) }
     Column(Modifier.fillMaxSize()) {
         if (rerunning) LinearProgressIndicator(Modifier.fillMaxWidth())
         Box(Modifier.fillMaxWidth().weight(0.4f).padding(horizontal = Space.m)) {
             TrackMap(
                 points = d.points, layer = layer, modifier = Modifier.fillMaxSize(),
-                events = d.markers, overlay = d.overlay, cursor = mapCursor,
-                onEventClick = onEventId, selectedEventId = selectedId,
+                events = pins, overlay = d.overlay, cursor = mapCursor,
+                onEventClick = onEventId, selectedEventId = selectedId ?: waypoint?.let { ReplayBuilder.waypointMarkerId(it.seq) },
             )
             LayerChips(layer, onLayer, Modifier.padding(Space.s), layers = REPLAY_LAYERS)
+            if (waypoint != null) WaypointCard(waypoint, d.startNs, onCloseWaypoint, Modifier.align(Alignment.BottomEnd).padding(Space.s))
         }
         // playback controls
         Row(
@@ -246,11 +256,64 @@ private fun ReplayContent(
                 TimelineChart(
                     series = series, startNs = d.startNs, endNs = d.endNs, cursorNs = cursor, events = ticks,
                     onScrub = onScrub, onEventTap = onEventIndex,
+                    waypoints = waypointTicks, onWaypointTap = onWaypointIndex,
                 )
                 Spacer(Modifier.height(Space.s))
                 Text(stringResource(R.string.live_replay_hint), style = Mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
+                if (d.roams.isNotEmpty()) RoamsSection(d.roams, d.startNs, onScrub)
             }
+        }
+    }
+}
+
+/** Label of a tapped waypoint: "Waypoint 3 · door B · 04:12" (+ fix accuracy). */
+@Composable
+private fun WaypointCard(w: WaypointSample, startNs: Long, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 2.dp) {
+        Row(Modifier.padding(start = Space.m, end = Space.xs, top = Space.xs, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.padding(end = Space.s)) {
+                Text(stringResource(R.string.live_replay_waypoint, w.seq), style = MaterialTheme.typography.labelLarge)
+                Text(w.label ?: stringResource(R.string.live_replay_waypoint_unlabeled), style = MaterialTheme.typography.bodyMedium)
+                val acc = w.hAccM?.let { " · ±${Fmt.d0(it)} m" }.orEmpty()
+                Text(Fmt.clock((w.stamp.tMonoNs - startNs) / 1_000_000) + acc, style = Mono.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, stringResource(R.string.action_close_waypoint)) }
+        }
+    }
+}
+
+/** "Roams · N" — one row per wifi_roam record; tap moves the cursor to the roam. */
+@Composable
+private fun RoamsSection(roams: List<WifiRoamSample>, startNs: Long, onScrub: (Long) -> Unit) {
+    Spacer(Modifier.height(Space.m))
+    Text(stringResource(R.string.live_replay_roams, roams.size), style = MaterialTheme.typography.titleSmall)
+    Spacer(Modifier.height(Space.xs))
+    val down = stringResource(R.string.live_replay_roam_down)
+    val penalty = stringResource(R.string.live_replay_roam_penalty)
+    roams.forEach { r ->
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onScrub(r.stamp.tMonoNs) }
+                .padding(vertical = Space.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${ReplayBuilder.bssidTail(r.fromBssid)} → ${ReplayBuilder.bssidTail(r.toBssid)}",
+                    style = Mono.body, modifier = Modifier.weight(1f),
+                )
+                Text(Fmt.clock((r.stamp.tMonoNs - startNs) / 1_000_000), style = Mono.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            val bands = "${r.fromBand ?: Fmt.DASH} → ${r.toBand ?: Fmt.DASH} GHz"
+            val rssi = "${Fmt.int(r.fromRssiDbm)} → ${Fmt.int(r.toRssiDbm)} dBm"
+            val pen = r.latencyPenaltyMs?.let { (if (it >= 0) "+" else "") + Fmt.d1(it) } ?: Fmt.DASH
+            fun flag(v: Boolean?) = when (v) { true -> "✓"; false -> "✗"; null -> "?" }
+            val kvr = "k${flag(r.target11k)} v${flag(r.target11v)} r${flag(r.target11r)}"
+            Text(
+                listOf(bands, rssi, "$down ${Fmt.long(r.linkDownMs)} ms", "$penalty $pen ms", kvr).joinToString(" · "),
+                style = Mono.small, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

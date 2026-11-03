@@ -31,6 +31,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,8 +46,9 @@ import kotlin.coroutines.resumeWithException
  *
  * Export pipeline: flush the writer → create a standalone `run.sqlite` from the canonical DDL →
  * copy the run's rows into it with `INSERT … SELECT` from the live database ATTACHed read-side →
- * stream the rows of `run.sqlite` into [Bundle.write]. `onProgress` is invoked on a background
- * thread with values in 0..1.
+ * add `v_<table>` views (t_run_s / t_local, like the CSVs) → stream the rows of `run.sqlite` into
+ * [Bundle.write] (cursor by cursor; no table is held in memory). `onProgress` is invoked on a
+ * background thread with values in 0..1.
  */
 @Singleton
 class BundleServiceImpl @Inject constructor(
@@ -80,9 +85,9 @@ class BundleServiceImpl @Inject constructor(
             val sqlite = File(stageDir, "run.sqlite")
             val totalSteps = (Schema.all.size + Schema.sampleTables.size + 1).toFloat()
             try {
-                buildStandalone(sqlite, liveDb, runId) { done -> onProgress(done / totalSteps) }
+                buildStandalone(sqlite, liveDb, run) { done -> onProgress(done / totalSteps) }
 
-                val out = File(exportsDir, "${safeName(run.name)}_${runId.take(8)}.zip")
+                val out = File(exportsDir, bundleFileName(run))
                 val part = File(exportsDir, "${out.name}.part")
                 SQLiteDatabase.openDatabase(sqlite.path, null, SQLiteDatabase.OPEN_READONLY).use { ro ->
                     val source = SqliteBundleSource(run, ro, sqlite) { tablesDone ->
@@ -115,7 +120,8 @@ class BundleServiceImpl @Inject constructor(
      * that moment — which the writer thread routinely does. Reading the live WAL file from a second
      * connection is safe and sees every committed (flushed) row.
      */
-    private fun buildStandalone(target: File, liveDb: File, runId: String, onTable: (Int) -> Unit) {
+    private fun buildStandalone(target: File, liveDb: File, run: RunRecord, onTable: (Int) -> Unit) {
+        val runId = run.runId
         target.delete()
         val out = SQLiteDatabase.openOrCreateDatabase(target, null)
         try {
@@ -139,6 +145,7 @@ class BundleServiceImpl @Inject constructor(
             } finally {
                 out.execSQL("DETACH DATABASE live")
             }
+            viewSql(run).forEach { out.execSQL(it) }
         } finally {
             out.close()
         }
@@ -191,6 +198,46 @@ class BundleServiceImpl @Inject constructor(
         private val ZIP = "application/zip".toMediaType()
 
         internal fun columnsOf(td: TableDef): List<String> = if (td.table == Table.RUNS) td.columnNames else td.exportColumns
+
+        private val STEM_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm", java.util.Locale.ROOT)
+
+        /** Zone the run was recorded in (runs.time_zone), else the device's current zone. */
+        internal fun zoneOf(run: RunRecord): ZoneId =
+            run.timeZone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
+
+        /** `office_t03_20261103-1831_1a2b3c4d.zip` (see [RunRecord.fileStem]). */
+        fun bundleFileName(run: RunRecord): String {
+            val local = Instant.ofEpochMilli(run.startedAt).atZone(zoneOf(run)).format(STEM_TIME)
+            return RunRecord.fileStem(run.site, run.testNumber, local) + "_" + run.runId.take(8) + ".zip"
+        }
+
+        /** "+04:00" / "-03:30" / "+00:00" — UTC offset of the run's zone at its start. */
+        internal fun offsetText(offset: ZoneOffset): String {
+            val total = offset.totalSeconds
+            val sign = if (total < 0) "-" else "+"
+            val abs = kotlin.math.abs(total)
+            return String.format(java.util.Locale.ROOT, "%s%02d:%02d", sign, abs / 3600, (abs % 3600) / 60)
+        }
+
+        /**
+         * `CREATE VIEW v_<table>` for every sample table: all columns plus
+         *  - `t_run_s` = (t_mono_ns − run start mono) / 1e9 (NULL when the run has no start mono), and
+         *  - `t_local` = ISO local time in the run's zone with its offset, e.g. `2026-11-03T18:31:05.120+04:00`.
+         * The offset is fixed at the run's start (a DST change mid-run is not reflected). It is
+         * applied as a `±N minutes` modifier, which every SQLite version supports.
+         */
+        internal fun viewSql(run: RunRecord): List<String> {
+            val offset = zoneOf(run).rules.getOffset(Instant.ofEpochMilli(run.startedAt))
+            val text = offsetText(offset)
+            val minutes = offset.totalSeconds / 60
+            val modifier = (if (minutes < 0) "-" else "+") + kotlin.math.abs(minutes) + " minutes"
+            val tRun = if (run.tMonoNs > 0) "(t_mono_ns - ${run.tMonoNs}) / 1e9" else "NULL"
+            return Schema.sampleTables.map { td ->
+                "CREATE VIEW IF NOT EXISTS v_${td.name} AS SELECT *, $tRun AS t_run_s, " +
+                    "strftime('%Y-%m-%dT%H:%M:%f', t_utc_ms / 1000.0, 'unixepoch', '$modifier') || '$text' AS t_local " +
+                    "FROM ${td.name}"
+            }
+        }
 
         /** File-system-safe run name for the bundle file name. */
         fun safeName(name: String): String =

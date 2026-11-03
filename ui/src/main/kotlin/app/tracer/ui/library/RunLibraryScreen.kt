@@ -85,6 +85,7 @@ import app.tracer.ui.common.formatClock
 import app.tracer.ui.common.formatDuration
 import app.tracer.ui.common.formatKm
 import app.tracer.ui.common.modeTag
+import app.tracer.ui.common.runTitle
 import app.tracer.ui.common.asString
 import app.tracer.ui.theme.LocalTracerColors
 import app.tracer.ui.theme.Mono
@@ -304,7 +305,7 @@ private fun RunCard(
             if (selecting) Checkbox(checked = selected, onCheckedChange = { onClick() })
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(r.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(runTitle(r), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(dateLabel(LocalContext.current, r.startedAt), style = Mono.small, color = cs.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(2.dp))
@@ -315,6 +316,7 @@ private fun RunCard(
                     append(modeTag(r.mode)); append("  "); append(duration)
                     append("  "); append(formatKm(extras?.distanceM))
                     append("  "); append(item.eventCount); append(" ev")
+                    r.protocol?.let { append("  "); append(it) }
                     if (r.devicePlatform == "ios") append("  iOS")
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

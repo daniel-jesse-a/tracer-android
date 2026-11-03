@@ -208,7 +208,7 @@ data class ProbeSample(
     val probeType: String,
     val endpoint: String,
     val success: Boolean,
-    /** null | timeout | dns | connect | tls | http_<code> | io | no_network */
+    /** Transport failure only (v2): null | timeout | dns | connect | tls | io | no_network. HTTP statuses are in [httpStatus]. */
     val error: String? = null,
     val dnsMs: Double? = null,
     val connectMs: Double? = null,

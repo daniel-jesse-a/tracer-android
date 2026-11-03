@@ -7,6 +7,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.EventListener
 import okhttp3.Handshake
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -16,6 +17,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -85,11 +87,20 @@ sealed interface BodyMode {
     data class Text(val maxBytes: Long = 64 * 1024) : BodyMode
 }
 
-/** Outcome of one probe call. */
+/**
+ * Outcome of one probe call.
+ *
+ * [success] = *reachable*: the first, timed hop returned an HTTP response — any status, including
+ * 3xx/4xx/5xx. [error] is set only for transport failures (timeout | dns | connect | tls | io); a
+ * failure while reading the body of a received response keeps success = true and sets [error].
+ * Whether the response was the *expected* one is decided by the caller from [finalCode].
+ */
 data class HttpProbeResult(
     val success: Boolean,
+    /** Status of the first (timed) hop. */
     val code: Int?,
     val error: String?,
+    /** Timing of the first hop only (redirects are followed untimed). */
     val phases: Phases,
     val bytes: Long? = null,
     /** Whole call duration (start → body fully read / headers for Ignore), ns. */
@@ -97,87 +108,155 @@ data class HttpProbeResult(
     val body: String? = null,
     /** Body transfer time from first body byte to last read byte (Discard mode), ns. */
     val transferNs: Long? = null,
+    /** Redirects followed after a 3xx first hop (0 when the first hop was not a redirect). */
+    val redirectCount: Int = 0,
+    /** URL of the last response in the redirect chain (the request URL when nothing was followed). */
+    val finalUrl: String? = null,
+    /** Status at the end of the redirect chain (= [code] when nothing was followed; null if a follow-up failed). */
+    val finalCode: Int? = null,
 )
 
 /** Executes probe requests with per-call phase timing and error classification. */
 object HttpProbe {
 
     /**
-     * Runs [request] on [client] (which should have redirects disabled), with a fresh
-     * [PhaseTimingListener]. Never throws for network failures; cancellation cancels the call.
-     * @param isSuccess decides success from the status code (default 2xx)
+     * Runs [request] on [client] (which should have redirects disabled) as one timed hop with a fresh
+     * [PhaseTimingListener]. When that hop is a 3xx with a Location and [followRedirects] is set, the
+     * chain is followed with a separate, untimed request on the same client (same bound network), at
+     * most [MAX_REDIRECTS] redirects in total, to fill redirectCount / finalUrl / finalCode.
+     * Never throws for network failures; cancellation cancels the call.
      */
     suspend fun execute(
         client: OkHttpClient,
         request: Request,
         body: BodyMode = BodyMode.Ignore,
-        isSuccess: (Int) -> Boolean = { it in 200..299 },
+        followRedirects: Boolean = true,
     ): HttpProbeResult {
         val timer = PhaseTimingListener()
         val timed = client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
             .eventListenerFactory(object : EventListener.Factory {
                 override fun create(call: Call): EventListener = timer
             })
             .build()
         val startNs = System.nanoTime()
-        return try {
-            val response = timed.newCall(request).await()
-            withContext(Dispatchers.IO) {
-                response.use { r ->
-                    var bytes: Long? = null
-                    var text: String? = null
-                    var transferNs: Long? = null
-                    when (body) {
-                        BodyMode.Ignore -> Unit
-                        is BodyMode.Discard -> {
-                            val d = discard(r, body.capBytes, body.maxTransferMs)
-                            bytes = d.first; transferNs = d.second
-                        }
-                        is BodyMode.Text -> {
-                            val raw = r.peekBody(body.maxBytes).bytes()
-                            text = String(raw, Charsets.UTF_8)
-                            bytes = raw.size.toLong()
-                        }
+        val response = try {
+            timed.newCall(request).await()
+        } catch (e: IOException) {
+            return HttpProbeResult(success = false, code = null, error = classifyError(e), phases = timer.phases(System.nanoTime()))
+        }
+        val first = withContext(Dispatchers.IO) {
+            response.use { r ->
+                var bytes: Long? = null
+                var text: String? = null
+                var transferNs: Long? = null
+                var bodyError: String? = null
+                when (body) {
+                    BodyMode.Ignore -> Unit
+                    is BodyMode.Discard -> {
+                        val d = discard(r, body.capBytes, body.maxTransferMs)
+                        bytes = d.bytes; transferNs = d.transferNs; bodyError = d.error?.let(::classifyError)
                     }
-                    val endNs = System.nanoTime()
-                    val ok = isSuccess(r.code)
-                    HttpProbeResult(
-                        success = ok,
-                        code = r.code,
-                        error = if (ok) null else "http_${r.code}",
-                        phases = timer.phases(endNs),
-                        bytes = bytes,
-                        durationNs = endNs - startNs,
-                        body = text,
-                        transferNs = transferNs,
-                    )
+                    is BodyMode.Text -> try {
+                        val raw = r.peekBody(body.maxBytes).bytes()
+                        text = String(raw, Charsets.UTF_8)
+                        bytes = raw.size.toLong()
+                    } catch (e: IOException) {
+                        bodyError = classifyError(e)
+                    }
                 }
+                val endNs = System.nanoTime()
+                HttpProbeResult(
+                    success = true,
+                    code = r.code,
+                    error = bodyError,
+                    phases = timer.phases(endNs),
+                    bytes = bytes,
+                    durationNs = endNs - startNs,
+                    body = text,
+                    transferNs = transferNs,
+                    redirectCount = 0,
+                    finalUrl = r.request.url.toString(),
+                    finalCode = r.code,
+                ) to r.header("Location")
+            }
+        }
+        val (result, location) = first
+        if (!followRedirects || !isRedirect(result.code) || location == null) return result
+        val chain = follow(client, request, location)
+        return result.copy(redirectCount = chain.count, finalUrl = chain.finalUrl, finalCode = chain.finalCode)
+    }
+
+    private data class Chain(val count: Int, val finalUrl: String, val finalCode: Int?)
+
+    /**
+     * Follows the redirect from [original]'s first hop to [location], untimed. The first hop already
+     * counts as one redirect; the follower may follow [MAX_REDIRECTS] − 1 more — after that the
+     * Location header is dropped so OkHttp returns the 3xx as the final response.
+     */
+    private suspend fun follow(client: OkHttpClient, original: Request, location: String): Chain {
+        val target = original.url.resolve(location)
+            ?: return Chain(1, location, null)
+        val hops = AtomicInteger(0)
+        val follower = client.newBuilder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .eventListener(EventListener.NONE)
+            .addNetworkInterceptor(Interceptor { chain ->
+                val resp = chain.proceed(chain.request())
+                if (hops.incrementAndGet() >= MAX_REDIRECTS && isRedirect(resp.code)) {
+                    resp.newBuilder().removeHeader("Location").build()
+                } else {
+                    resp
+                }
+            })
+            .build()
+        // Same method (probes only use HEAD/GET without a body) and headers as the timed hop.
+        val next = original.newBuilder().url(target).build()
+        return try {
+            val r = follower.newCall(next).await()
+            r.use {
+                var prior = 0
+                var p = it.priorResponse
+                while (p != null) { prior++; p = p.priorResponse }
+                Chain(1 + prior, it.request.url.toString(), it.code)
             }
         } catch (e: IOException) {
-            HttpProbeResult(success = false, code = null, error = classifyError(e), phases = timer.phases(System.nanoTime()))
+            Chain(1, target.toString(), null)
         }
     }
 
-    /** Reads and discards up to [capBytes] or until [maxTransferMs] after the first byte. Returns (bytes, transferNs). */
-    private fun discard(r: Response, capBytes: Long, maxTransferMs: Long): Pair<Long, Long?> {
+    private class Discarded(val bytes: Long, val transferNs: Long?, val error: IOException?)
+
+    /**
+     * Reads and discards up to [capBytes] or until [maxTransferMs] after the first byte. A transport
+     * failure mid-body keeps the bytes read so far (they count against the mobile-data budget).
+     */
+    private fun discard(r: Response, capBytes: Long, maxTransferMs: Long): Discarded {
         // Typed as nullable so this compiles whether or not ResponseBody is platform-nullable.
         val responseBody: ResponseBody? = r.body
-        val input = responseBody?.byteStream() ?: return 0L to null
         val buf = ByteArray(64 * 1024)
         var total = 0L
         var firstNs = 0L
         var lastNs = 0L
+        var error: IOException? = null
         val capNs = if (maxTransferMs == Long.MAX_VALUE) Long.MAX_VALUE else maxTransferMs * 1_000_000L
-        while (total < capBytes) {
-            val want = minOf(buf.size.toLong(), capBytes - total).toInt()
-            val n = input.read(buf, 0, want)
-            if (n < 0) break
-            lastNs = System.nanoTime()
-            if (firstNs == 0L) firstNs = lastNs
-            total += n
-            if (lastNs - firstNs >= capNs) break
+        try {
+            val input = responseBody?.byteStream() ?: return Discarded(0L, null, null)
+            while (total < capBytes) {
+                val want = minOf(buf.size.toLong(), capBytes - total).toInt()
+                val n = input.read(buf, 0, want)
+                if (n < 0) break
+                lastNs = System.nanoTime()
+                if (firstNs == 0L) firstNs = lastNs
+                total += n
+                if (lastNs - firstNs >= capNs) break
+            }
+        } catch (e: IOException) {
+            error = e
         }
-        return total to (if (firstNs == 0L) null else (lastNs - firstNs).coerceAtLeast(1L))
+        return Discarded(total, if (firstNs == 0L) null else (lastNs - firstNs).coerceAtLeast(1L), error)
     }
 }
 

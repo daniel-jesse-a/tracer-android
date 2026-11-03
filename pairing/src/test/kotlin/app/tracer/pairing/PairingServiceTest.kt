@@ -49,6 +49,7 @@ class PairingServiceTest {
         override suspend fun importBundle(bundle: Bundle.ImportedBundle): RunRecord = bundle.run
         override fun databaseFile(): File = File("unused")
         override suspend fun deleteOlderThan(cutoffUtcMs: Long): Int = 0
+        override suspend fun nextTestNumber(site: String): Int = 1
     }
 
     private fun run(id: String, platform: String = "android") =

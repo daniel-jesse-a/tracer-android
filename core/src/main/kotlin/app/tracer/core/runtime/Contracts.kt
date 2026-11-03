@@ -44,7 +44,7 @@ data class CollectorContext(
  * unsupported) — report via [CollectorStatusBoard] and complete or idle instead.
  */
 interface Collector {
-    /** location | gnss | cellular | wifi | wifi_scan | wifi_rtt | network_path | motion | device | probe_latency | probe_throughput | probe_public_ip | probe_captive */
+    /** location | gnss | cellular | wifi | wifi_scan | wifi_rtt | network_path | motion | device | probe_latency | probe_throughput | probe_public_ip | probe_captive | probe_internal */
     val id: String
     /** Expected max silence before the watchdog restarts this collector; null = no watchdog. */
     val watchdogMs: Long? get() = null

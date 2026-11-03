@@ -35,8 +35,29 @@ fun classifyError(t: Throwable): String {
     return "io"
 }
 
-/** probe.error for an HTTP status: null for 2xx, "http_<code>" otherwise (redirects are not followed, so 3xx fails). */
-fun httpError(code: Int): String? = if (code in 200..299) null else "http_$code"
+/** Max redirects followed (untimed) after a 3xx first hop, to learn probe.final_url / redirect_count. */
+const val MAX_REDIRECTS = 5
+
+/** 3xx: the probe follows its Location (untimed, when present) to find the final status. */
+fun isRedirect(code: Int?): Boolean = code != null && code in 300..399
+
+/** 2xx = expected response for probes without an explicit expected status (public_ip, throughput). */
+fun is2xx(code: Int?): Boolean = code != null && code in 200..299
+
+/**
+ * probe.interface: transport name of a network — "vpn" | "wifi" | "cellular" | "ethernet" | "other".
+ * VPN wins (its capabilities also list the underlying transport). Never a kernel name (wlan0/rmnet1).
+ */
+fun transportName(wifi: Boolean, cellular: Boolean, ethernet: Boolean, vpn: Boolean): String = when {
+    vpn -> "vpn"
+    wifi -> "wifi"
+    cellular -> "cellular"
+    ethernet -> "ethernet"
+    else -> "other"
+}
+
+/** settings.cellularDataBudgetMb → bytes (decimal MB, as throughputBytes = 10_000_000 is "10 MB"). */
+fun budgetBytes(mb: Long): Long = if (mb >= Long.MAX_VALUE / 1_000_000L) Long.MAX_VALUE else mb * 1_000_000L
 
 /**
  * Adaptive latency-probe interval.

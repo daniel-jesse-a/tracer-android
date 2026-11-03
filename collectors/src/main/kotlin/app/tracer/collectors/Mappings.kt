@@ -60,22 +60,6 @@ fun ratOf(overrideNetworkType: Int, networkType: Int): String = when (overrideNe
     }
 }
 
-private val NR_STATE_RE = Regex("""nrState=(\w+)""")
-private val NR_STATE_RANK = listOf("none", "restricted", "not_restricted", "connected")
-
-/**
- * Parses the hidden NR state out of ServiceState.toString() (one `nrState=` per
- * NetworkRegistrationInfo). The CS-domain entry is usually NONE, so the most advanced state
- * across all entries wins. Returns none | restricted | not_restricted | connected, or null.
- */
-fun parseNrState(serviceStateText: String?): String? {
-    if (serviceStateText == null) return null
-    return NR_STATE_RE.findAll(serviceStateText)
-        .map { it.groupValues[1].lowercase() }
-        .filter { it in NR_STATE_RANK }
-        .maxByOrNull { NR_STATE_RANK.indexOf(it) }
-}
-
 /** WifiInfo.SECURITY_TYPE_* (API 31) → OPEN | WEP | WPA2 | WPA3 | OWE | ENTERPRISE | UNKNOWN. */
 fun securityName(securityType: Int): String = when (securityType) {
     0 -> "OPEN"            // SECURITY_TYPE_OPEN
@@ -117,6 +101,44 @@ fun primaryInterfaceOf(transports: List<String>): String {
     order.firstOrNull { it in transports }?.let { return it }
     val nonVpn = transports.filter { it != "vpn" }
     return if (nonVpn.isEmpty()) "vpn" else "other"
+}
+
+/**
+ * x_android_network.interface / probe.interface: the network's transport name — "vpn" | "wifi" |
+ * "cellular" | "ethernet" | "other" (null when there are no transports). Never a kernel name.
+ */
+fun transportNameOf(transports: List<String>): String? = when {
+    transports.isEmpty() -> null
+    "vpn" in transports -> "vpn"
+    "wifi" in transports -> "wifi"
+    "cellular" in transports -> "cellular"
+    "ethernet" in transports -> "ethernet"
+    else -> "other"
+}
+
+/** 802.11 element IDs used by [scanFeatures]. */
+internal object ElementId {
+    const val MOBILITY_DOMAIN = 54
+    const val RM_ENABLED_CAPABILITIES = 70
+    const val EXTENDED_CAPABILITIES = 127
+}
+
+/**
+ * wifi_scan.features from an AP's information elements (id → body bytes) and capabilities string:
+ *  - "11k": RM Enabled Capabilities element (70) present
+ *  - "11v": Extended Capabilities (127) bit 19 = BSS Transition (octet 2, bit 3)
+ *  - "11r": Mobility Domain element (54) present, or an FT AKM in the capabilities ("FT/PSK", "FT/SAE", "FT/EAP")
+ * Returns the comma-joined list in that order, or null when none apply.
+ */
+fun scanFeatures(elements: List<Pair<Int, ByteArray>>, capabilities: String?): String? {
+    val k = elements.any { it.first == ElementId.RM_ENABLED_CAPABILITIES }
+    val v = elements.any { (id, octets) -> id == ElementId.EXTENDED_CAPABILITIES && octets.size > 2 && (octets[2].toInt() and 0x08) != 0 }
+    val r = elements.any { it.first == ElementId.MOBILITY_DOMAIN } || capabilities?.contains("FT/") == true
+    return buildList {
+        if (k) add("11k")
+        if (v) add("11v")
+        if (r) add("11r")
+    }.takeIf { it.isNotEmpty() }?.joinToString(",")
 }
 
 /** GnssStatus.CONSTELLATION_* → name. */

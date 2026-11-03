@@ -18,8 +18,12 @@ import javax.inject.Inject
 
 /**
  * [probe_latency] — one "probe set" per interval: an HTTPS HEAD to every configured endpoint,
- * sequentially, each on a fresh connection bound to the current default network, with per-phase
- * timing. Interval adapts (see [nextLatencyIntervalMs]).
+ * sequentially, each on a fresh connection, with per-phase timing. One set per network from
+ * [ProbeNetworks.networksFor] (settings.paths), run concurrently; the first network is the primary
+ * path whose results drive the adaptive interval (see [nextLatencyIntervalMs]).
+ *
+ * success = reachable (any HTTP response, incl. 3xx/4xx/5xx); a 3xx is followed untimed to fill
+ * redirect_count / final_url; expected_response = ProbeEndpoint.isExpected(final status).
  */
 class LatencyProbeCollector @Inject constructor(
     private val networks: ProbeNetworks,
@@ -29,45 +33,43 @@ class LatencyProbeCollector @Inject constructor(
 
     override fun samples(ctx: CollectorContext): Flow<Sample> = channelFlow {
         val settings = ctx.settings.effective()
+        val paths = settings.paths
         val base = settings.latencyIntervalMs.coerceAtLeast(500L)
         val recent = ArrayDeque<Double?>()
         var interval = base
-        if (settings.dualPathProbing) networks.acquireCellular()
+        networks.acquireFor(paths)
         try {
+            networks.awaitLease(paths)
             while (isActive) {
                 ctx.signals.awaitResumed()
                 val startedMs = SystemClock.elapsedRealtime()
-                val default = networks.current()
-                // Dual path: while Wi-Fi is the default, measure the mobile-data path concurrently
-                // (sequential sets stretched a 2 s cadence to ~5 s in "Office test 3").
-                val cell = if (settings.dualPathProbing && default?.isCellular != true) networks.cellularIfNotDefault() else null
-                val cellJob = cell?.let { c -> async { runSet(ctx, settings, c) } }
-                for (sample in runSet(ctx, settings, default)) {
+                val targets = networks.networksFor(paths)
+                // Secondary paths (e.g. mobile data while on Wi-Fi) run concurrently with the primary:
+                // sequential sets stretched a 2 s cadence to ~5 s in "Office test 3".
+                val secondary = targets.drop(1).map { b -> async { runSet(ctx, settings, b) } }
+                val primary = targets.firstOrNull()?.let { runSet(ctx, settings, it) }
+                    ?: settings.endpoints.map { noNetworkSample(ctx.runId, ctx.clock.now(), "latency", it.url, paths) }
+                for (sample in primary) {
                     send(sample)
                     ctx.status.sample(id, sample.stamp.tMonoNs)
                     recent.addLast(if (sample.success) sample.connectMs ?: sample.totalMs else null)
                     while (recent.size > 10) recent.removeFirst()
                 }
-                cellJob?.await()?.forEach { send(it) }
+                secondary.forEach { job -> job.await().forEach { send(it) } }
                 interval = nextLatencyIntervalMs(base, interval, ctx.signals.degraded.value, settings.adaptiveLatency, recent.toList())
                 // start-to-start cadence: subtract the time the sets themselves took
                 delay((interval - (SystemClock.elapsedRealtime() - startedMs)).coerceAtLeast(MIN_GAP_MS))
             }
         } finally {
-            if (settings.dualPathProbing) networks.releaseCellular()
+            networks.releaseFor(paths)
         }
     }
 
-    private suspend fun runSet(ctx: CollectorContext, settings: RunSettings, bound: BoundNetwork?): List<ProbeSample> {
-        val urls = settings.endpoints.map { it.url }
-        if (bound == null) {
-            return urls.map { url ->
-                ProbeSample(runId = ctx.runId, stamp = ctx.clock.now(), probeType = "latency", endpoint = url, success = false, error = "no_network")
-            }
-        }
+    private suspend fun runSet(ctx: CollectorContext, settings: RunSettings, bound: BoundNetwork): List<ProbeSample> {
         // Fresh client per set: no pooled connections, bound to this set's network.
         val client = networks.client(baseClient, bound.network, settings.thresholds.probeTimeoutMs)
-        return urls.map { url ->
+        return settings.endpoints.map { endpoint ->
+            val url = endpoint.url
             val stamp = ctx.clock.now()
             val request = try {
                 Request.Builder().url(url).head().build()
@@ -75,25 +77,10 @@ class LatencyProbeCollector @Inject constructor(
                 null
             }
             if (request == null) {
-                ProbeSample(ctx.runId, stamp, "latency", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular)
+                ProbeSample(ctx.runId, stamp, "latency", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular, expectedResponse = false)
             } else {
-                // Any HTTP response proves the path works (redirects/4xx included); only 5xx counts as failure.
-                val r = HttpProbe.execute(client, request, isSuccess = { it < 500 })
-                ProbeSample(
-                    runId = ctx.runId,
-                    stamp = stamp,
-                    probeType = "latency",
-                    endpoint = url,
-                    success = r.success,
-                    error = r.error,
-                    dnsMs = r.phases.dnsMs,
-                    connectMs = r.phases.connectMs,
-                    tlsMs = r.phases.tlsMs,
-                    ttfbMs = r.phases.ttfbMs,
-                    totalMs = r.phases.totalMs,
-                    iface = bound.iface,
-                    isCellular = bound.isCellular,
-                )
+                val r = HttpProbe.execute(client, request)
+                r.toProbeSample(ctx.runId, stamp, "latency", url, bound, expected = endpoint.isExpected(r.finalCode))
             }
         }
     }

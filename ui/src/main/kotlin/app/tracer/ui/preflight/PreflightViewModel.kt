@@ -6,10 +6,13 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.tracer.core.analysis.Protocol
 import app.tracer.core.config.RunSettings
+import app.tracer.core.model.RunRecord
 import app.tracer.core.pairing.PairingPayload
 import app.tracer.core.runtime.DeviceInfoProvider
 import app.tracer.core.runtime.RunController
+import app.tracer.core.runtime.RunRepository
 import app.tracer.ui.R
 import app.tracer.ui.common.ReadinessStatus
 import app.tracer.ui.common.UiText
@@ -21,7 +24,17 @@ import app.tracer.ui.onboarding.Permissions
 import app.tracer.ui.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +49,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.abs
@@ -46,13 +62,23 @@ enum class FixAction { PERMISSIONS, LOCATION_SETTINGS, BATTERY, DEV_OPTIONS, RET
 
 data class ReadinessUi(val title: UiText, val sub: UiText, val status: ReadinessStatus, val fix: FixAction? = null)
 
+enum class RunType { FREE, PROTOCOL }
+
 data class RunSetup(
     val name: String,
     /** walk | drive | rail | custom */
     val mode: String = "drive",
     val batterySaver: Boolean = false,
     val simulate: Boolean = false,
-)
+    /** "Office"; blank = no site (the run keeps [name]) */
+    val site: String = "",
+    val runType: RunType = RunType.FREE,
+    /** selected [Protocol.id] while [runType] is PROTOCOL */
+    val protocolId: String? = null,
+) {
+    val protocol: Protocol? get() = if (runType == RunType.PROTOCOL) Protocol.byId(protocolId) else null
+    val siteOrNull: String? get() = site.trim().takeIf { it.isNotEmpty() }
+}
 
 data class PreflightUi(
     val items: List<ReadinessUi>,
@@ -69,6 +95,7 @@ enum class IntervalField { SAMPLING, PROBES, WIFI_SCAN }
 class PreflightViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val controller: RunController,
+    private val repository: RunRepository,
     private val settingsRepository: SettingsRepository,
     private val deviceInfo: DeviceInfoProvider,
     private val companion: CompanionLink,
@@ -91,6 +118,20 @@ class PreflightViewModel @Inject constructor(
     private val _setup = MutableStateFlow(RunSetup(name = context.getString(R.string.preflight_default_name, formatDateTime(System.currentTimeMillis()))))
     val setup: StateFlow<RunSetup> = _setup.asStateFlow()
 
+    /**
+     * Live preview of the run name the service will assign, "Office · T4 · 2026-11-03 19:05"
+     * (next test number for the typed site; the minute ticks). null while the site is blank.
+     */
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val namePreview: StateFlow<String?> = combine(
+        _setup.map { it.siteOrNull }.distinctUntilChanged().debounce(250).mapLatest { site ->
+            site?.let { it to runCatching { repository.nextTestNumber(it) }.getOrDefault(1) }
+        },
+        minuteTicker(),
+    ) { siteAndNumber, nowMs ->
+        siteAndNumber?.let { (site, n) -> RunRecord.displayName(site, n, Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).format(PREVIEW_TIME)) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     private val statics = MutableStateFlow(readStatics())
     private val endpoints = MutableStateFlow<Endpoints?>(null)
     private val gnss = gnssStateFlow(context).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GnssState(permission = false, providerEnabled = false))
@@ -106,6 +147,11 @@ class PreflightViewModel @Inject constructor(
             // seed battery-saver toggle from the stored default once
             val first = settingsRepository.settings.first()
             _setup.update { it.copy(batterySaver = first.batterySaver) }
+        }
+        viewModelScope.launch {
+            // remember the last site: seed once, unless the user already typed one
+            val last = settingsRepository.lastSite.first()
+            if (last != null) _setup.update { if (it.site.isEmpty()) it.copy(site = last) else it }
         }
         checkEndpoints()
     }
@@ -129,6 +175,9 @@ class PreflightViewModel @Inject constructor(
     fun setBatterySaver(v: Boolean) = _setup.update { it.copy(batterySaver = v) }
     fun setSimulate(v: Boolean) = _setup.update { it.copy(simulate = v) }
     fun setLinkOnStart(v: Boolean) = companion.setLinkOnStart(v)
+    fun setSite(v: String) = _setup.update { it.copy(site = v.take(MAX_SITE_LEN)) }
+    fun setRunType(t: RunType) = _setup.update { it.copy(runType = t, protocolId = it.protocolId ?: Protocol.ALL.firstOrNull()?.id) }
+    fun setProtocol(id: String) = _setup.update { it.copy(runType = RunType.PROTOCOL, protocolId = id) }
 
     fun setInterval(field: IntervalField, ms: Long) {
         viewModelScope.launch {
@@ -148,7 +197,19 @@ class PreflightViewModel @Inject constructor(
         val base = settings.value ?: RunSettings()
         val scenario = if (isDebugBuild && s.simulate) simScenario.value ?: "commute" else null
         val name = s.name.ifBlank { context.getString(R.string.preflight_default_name, formatDateTime(System.currentTimeMillis())) }
-        controller.start(name, s.mode, base.copy(batterySaver = s.batterySaver), scenario)
+        val site = s.siteOrNull
+        // protocol runs ignore the user's settings in the service (fixed settings + duration)
+        controller.start(name, s.mode, base.copy(batterySaver = s.batterySaver), scenario, site = site, protocolId = s.protocol?.id)
+        // outlives this ViewModel (navigation clears it right after start)
+        persistScope.launch { runCatching { settingsRepository.setLastSite(site) } }
+    }
+
+    private fun minuteTicker() = flow {
+        while (true) {
+            val now = System.currentTimeMillis()
+            emit(now)
+            delay(60_000L - now % 60_000L)
+        }
     }
 
     // ------------------------------------------------------------------ checks
@@ -273,6 +334,18 @@ class PreflightViewModel @Inject constructor(
     }
 
     companion object {
+        private const val MAX_SITE_LEN = 40
+        private val PREVIEW_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
+        /** Process-lifetime scope for small writes that must survive the ViewModel (last site). */
+        private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /** "10 min" / "2 h" / "90 s" */
+        fun durationLabel(seconds: Int): String = when {
+            seconds >= 3_600 && seconds % 3_600 == 0 -> "${seconds / 3_600} h"
+            seconds >= 60 && seconds % 60 == 0 -> "${seconds / 60} min"
+            else -> "$seconds s"
+        }
+
         /** Partner clock − our clock, via both GNSS offsets (true time = wall + gpsOffset on each device). */
         fun deltaMs(g: GnssState, partner: PairingPayload?): Long? {
             val ours = g.gpsOffsetMs ?: return null

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.Log
 import app.tracer.core.config.RunSettings
 import app.tracer.core.model.RunState
+import app.tracer.core.model.Stamp
 import app.tracer.core.runtime.LiveSnapshot
 import app.tracer.core.runtime.RunController
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -36,7 +37,7 @@ class RunControllerFacade @Inject constructor(
     override val live: StateFlow<LiveSnapshot> = _live.asStateFlow()
     override val runId: StateFlow<String?> = _runId.asStateFlow()
 
-    override fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String?) {
+    override fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String?, site: String?, protocolId: String?) {
         if (_state.value != RunState.IDLE) return
         _runId.value = null
         _live.value = LiveSnapshot(state = RunState.PREFLIGHT)
@@ -46,6 +47,8 @@ class RunControllerFacade @Inject constructor(
             .putExtra(RunService.EXTRA_MODE, mode)
             .putExtra(RunService.EXTRA_SETTINGS_JSON, settings.toStorageJson())
             .putExtra(RunService.EXTRA_SCENARIO, simulateScenario)
+            .putExtra(RunService.EXTRA_SITE, site?.trim()?.takeIf { it.isNotEmpty() })
+            .putExtra(RunService.EXTRA_PROTOCOL, protocolId)
         try {
             context.startForegroundService(intent)
         } catch (e: Exception) { // ForegroundServiceStartNotAllowedException (app in background) / SecurityException
@@ -63,6 +66,15 @@ class RunControllerFacade @Inject constructor(
         send(RunService.ACTION_MARK) {
             putExtra(RunService.EXTRA_TEXT, text)
             putExtra(RunService.EXTRA_AUDIO_PATH, audioPath)
+        }
+    }
+
+    /** [tappedAt] travels as two longs so the service stamps the waypoint with the tap, not delivery, time. */
+    override fun markWaypoint(label: String?, tappedAt: Stamp) {
+        send(RunService.ACTION_WAYPOINT) {
+            putExtra(RunService.EXTRA_LABEL, label?.trim()?.takeIf { it.isNotEmpty() })
+            putExtra(RunService.EXTRA_TAP_UTC_MS, tappedAt.tUtcMs)
+            putExtra(RunService.EXTRA_TAP_MONO_NS, tappedAt.tMonoNs)
         }
     }
 

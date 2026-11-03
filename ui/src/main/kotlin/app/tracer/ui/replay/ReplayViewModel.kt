@@ -10,7 +10,9 @@ import app.tracer.core.model.NetworkPathSample
 import app.tracer.core.model.ProbeSample
 import app.tracer.core.model.RadioSample
 import app.tracer.core.model.Table
+import app.tracer.core.model.WaypointSample
 import app.tracer.core.model.WifiConnectionSample
+import app.tracer.core.model.WifiRoamSample
 import app.tracer.core.runtime.PairingService
 import app.tracer.core.runtime.RunRepository
 import app.tracer.events.EventEngine
@@ -64,6 +66,10 @@ class ReplayViewModel @Inject constructor(
     private val _selected = MutableStateFlow<ReplaySelection?>(null)
     val selected: StateFlow<ReplaySelection?> = _selected.asStateFlow()
 
+    /** Waypoint whose label is shown (pin or tick tapped). */
+    private val _waypoint = MutableStateFlow<WaypointSample?>(null)
+    val waypoint: StateFlow<WaypointSample?> = _waypoint.asStateFlow()
+
     private var runId: String? = null
 
     fun load(runId: String, atMonoNs: Long?) {
@@ -95,10 +101,14 @@ class ReplayViewModel @Inject constructor(
         val radio = repository.samples(id, Table.RADIO).filterIsInstance<RadioSample>()
         val paths = repository.samples(id, Table.NETWORK_PATH).filterIsInstance<NetworkPathSample>()
         val wifi = repository.samples(id, Table.WIFI_CONNECTION).filterIsInstance<WifiConnectionSample>()
-        val sats = repository.samples(id, Table.GNSS_SATELLITE).filterIsInstance<GnssSatelliteSample>()
+        // ~10–40 satellite rows per second: stream and keep only the used-in-fix count per epoch.
+        val epochAcc = TrackBuilder.GnssEpochAccumulator()
+        repository.stream(id, Table.GNSS_SATELLITE).collect { if (it is GnssSatelliteSample) epochAcc.add(it) }
+        val epochs = epochAcc.build()
         val events = repository.events(id).sortedBy { it.second.stamp.tMonoNs }
         val labels = repository.eventLabels(id)
-        val epochs = TrackBuilder.gnssEpochs(sats)
+        val waypoints = repository.samples(id, Table.WAYPOINT).filterIsInstance<WaypointSample>().sortedBy { it.seq }
+        val roams = repository.samples(id, Table.WIFI_ROAM).filterIsInstance<WifiRoamSample>()
         val (rsrp, sinr) = ReplayBuilder.serving(serving)
 
         val allTimes = listOfNotNull(
@@ -146,6 +156,8 @@ class ReplayViewModel @Inject constructor(
                 if (la != null && lo != null) EventMarker(rowId, la, lo, e.severity, e.eventType) else null
             },
             linkedName = linkedRun?.name,
+            waypoints = waypoints,
+            roams = roams,
         )
     }
 
@@ -176,8 +188,13 @@ class ReplayViewModel @Inject constructor(
 
     // ---------------------------------------------------------------- events
 
+    /** Map pin tap: event rowid, or a waypoint pin (negative id, see [ReplayBuilder.waypointMarkerId]). */
     fun openEvent(rowId: Long) {
         val d = _ui.value.data ?: return
+        ReplayBuilder.waypointSeqOf(rowId)?.let { seq ->
+            d.waypoints.firstOrNull { it.seq == seq }?.let { openWaypoint(it) }
+            return
+        }
         val e = d.events.firstOrNull { it.first == rowId } ?: return
         _cursor.value = e.second.stamp.tMonoNs
         _selected.value = ReplaySelection(rowId, e.second, d.labels[rowId])
@@ -186,6 +203,15 @@ class ReplayViewModel @Inject constructor(
     fun openEventIndex(i: Int) { _ui.value.data?.events?.getOrNull(i)?.let { openEvent(it.first) } }
 
     fun closeEvent() { _selected.value = null }
+
+    fun openWaypointIndex(i: Int) { _ui.value.data?.waypoints?.getOrNull(i)?.let { openWaypoint(it) } }
+
+    private fun openWaypoint(w: WaypointSample) {
+        _ui.value.data?.let { d -> _cursor.value = w.stamp.tMonoNs.coerceIn(d.startNs, d.endNs) }
+        _waypoint.value = w
+    }
+
+    fun closeWaypoint() { _waypoint.value = null }
 
     fun setLabel(label: String) {
         val sel = _selected.value ?: return
@@ -200,15 +226,20 @@ class ReplayViewModel @Inject constructor(
 
     private fun ReplayData.withLabel(id: Long, label: String) = ReplayData(
         run, startNs, endNs, points, overlay, type, rat, rsrp, sinr, latency, loss, throughput, wifi, gnssUsed,
-        linkedLatency, linkedRsrp, events, labels + (id to label), markers, linkedName,
+        linkedLatency, linkedRsrp, events, labels + (id to label), markers, linkedName, waypoints, roams,
     )
 
     // ---------------------------------------------------------------- re-run rules
 
-    /** Re-runs the event engine over every sample (merged by t_mono_ns) with current thresholds, then reloads. */
+    /**
+     * Re-runs the event engine over every sample (merged by t_mono_ns) with current thresholds, then
+     * reloads. Bounded memory for multi-hour runs: samples are read in [RERUN_WINDOW_NS] time windows
+     * (first/last window open-ended), merged per window and fed through one engine.
+     */
     fun rerunRules() {
         val id = runId ?: return
         if (_ui.value.rerunning) return
+        val range = _ui.value.data?.let { it.startNs to it.endNs }
         _ui.value = _ui.value.copy(rerunning = true, rerunResult = null)
         viewModelScope.launch {
             val res = runCatching {
@@ -218,8 +249,17 @@ class ReplayViewModel @Inject constructor(
                         Table.LOCATION, Table.GNSS_SATELLITE, Table.CELL_SERVING, Table.CELL_NEIGHBOUR, Table.RADIO,
                         Table.WIFI_CONNECTION, Table.WIFI_SCAN, Table.NETWORK_PATH, Table.PROBE,
                     )
-                    val merged = ReplayBuilder.mergeByTime(tables.map { t -> withContext(Dispatchers.IO) { repository.samples(id, t) } })
-                    val events = EventEngine(id, th).replay(merged.asSequence())
+                    val engine = EventEngine(id, th)
+                    val events = ArrayList<EventSample>()
+                    // window boundaries; null = unbounded (catches rows outside the displayed range)
+                    val (start, end) = range ?: (0L to 0L)
+                    val cuts = buildList { var t = start + RERUN_WINDOW_NS; while (range != null && t < end) { add(t); t += RERUN_WINDOW_NS } }
+                    val windows = (listOf<Long?>(null) + cuts).zip(cuts.map<Long, Long?> { it } + listOf<Long?>(null))
+                    for ((from, toExclusive) in windows) {
+                        val parts = tables.map { t -> withContext(Dispatchers.IO) { repository.samples(id, t, from, toExclusive?.minus(1)) } }
+                        for (smp in ReplayBuilder.mergeByTime(parts)) events += engine.onSample(smp)
+                    }
+                    events += engine.finish()
                     withContext(Dispatchers.IO) { repository.replaceEvents(id, events) }
                     events.size
                 }
@@ -231,4 +271,9 @@ class ReplayViewModel @Inject constructor(
     }
 
     fun clearRerunResult() { _ui.value = _ui.value.copy(rerunResult = null) }
+
+    private companion object {
+        /** 5 min of samples per re-run window (≈ 20k GNSS rows at most). */
+        const val RERUN_WINDOW_NS = 5L * 60 * 1_000_000_000L
+    }
 }

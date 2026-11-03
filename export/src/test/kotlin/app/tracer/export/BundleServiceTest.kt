@@ -53,8 +53,9 @@ class BundleServiceTest {
 
     @Test fun exportThenReadBack() = runBlocking<Unit> {
         repo.createRun(
-            RunRecord(runId, "Congestion / SZR", "drive", "android", "Pixel 9", "16", "1.0.0", 1_760_000_000_000L, 1_760_000_080_000L,
-                gpsOffsetMsStart = 350, completenessJson = "{\"badge\":\"complete\"}"),
+            RunRecord(runId, "Office · T3 · 2025-10-09 12:53", "drive", "android", "Pixel 9", "16", "1.0.0", 1_760_000_000_000L, 1_760_000_080_000L,
+                gpsOffsetMsStart = 350, completenessJson = "{\"badge\":\"complete\"}",
+                tMonoNs = SyntheticRun().startMonoNs, site = "Office", testNumber = 3, timeZone = "Asia/Dubai"),
         )
         val samples = Scenarios.byName("congestion")
         samples.forEach { writer.emit(it) } // not flushed: export must flush first
@@ -65,7 +66,8 @@ class BundleServiceTest {
         val zip = service.export(runId) { progress += it }
 
         assertThat(zip.isFile).isTrue()
-        assertThat(zip.name).isEqualTo("Congestion_SZR_${runId.take(8)}.zip")
+        // site + test number + local start in the run's zone (Dubai, +04:00)
+        assertThat(zip.name).isEqualTo("office_t03_20251009-1253_${runId.take(8)}.zip")
         assertThat(progress).isNotEmpty()
         assertThat(progress.last()).isEqualTo(1f)
         assertThat(progress).isInOrder()
@@ -80,6 +82,20 @@ class BundleServiceTest {
         for (td in Schema.sampleTables) {
             assertWithMessage(td.name).that(imported.samples[td.table]?.size ?: 0).isEqualTo(expected[td.table] ?: 0)
         }
+
+        // lean bundle v2: CSVs only for tables with rows, never iOS-only tables; summary.json present
+        val entries = java.util.zip.ZipFile(zip).use { zf -> zf.entries().asSequence().map { it.name }.toSet() }
+        assertThat(entries).containsAtLeast("run.json", "runs.csv", "run.sqlite", "summary.json", "track.geojson", "events.geojson")
+        for (td in Schema.sampleTables) {
+            val csv = "${td.name}.csv"
+            if ((expected[td.table] ?: 0) > 0 && !td.table.iosOnly) assertWithMessage(csv).that(entries).contains(csv)
+            else assertWithMessage(csv).that(entries).doesNotContain(csv)
+        }
+        assertThat(entries).doesNotContain("metrickit_payload.csv")
+        assertThat(imported.manifest["bundle_version"].toString()).isEqualTo(Bundle.BUNDLE_VERSION.toString())
+        assertThat(imported.manifest["time_zone"].toString()).isEqualTo("\"Asia/Dubai\"")
+        assertThat(imported.run.site).isEqualTo("Office")
+        assertThat(imported.run.testNumber).isEqualTo(3)
         assertThat(imported.samples[Table.LOCATION]).isEqualTo(samples.filter { it.table == Table.LOCATION })
 
         val bytes = imported.sqliteBytes
@@ -92,8 +108,29 @@ class BundleServiceTest {
             for (td in Schema.sampleTables) {
                 assertWithMessage(td.name).that(count("SELECT COUNT(*) FROM ${td.name}")).isEqualTo((expected[td.table] ?: 0).toLong())
                 assertWithMessage(td.name).that(count("SELECT COUNT(*) FROM ${td.name} WHERE run_id <> ?", runId)).isEqualTo(0L)
+                // every sample table has a v_<table> view with the same rows
+                assertWithMessage("v_${td.name}").that(count("SELECT COUNT(*) FROM v_${td.name}")).isEqualTo((expected[td.table] ?: 0).toLong())
+            }
+            // t_run_s / t_local on the views (first location row of the synthetic run is at t = 0 s)
+            val first = samples.filter { it.table == Table.LOCATION }.minBy { it.stamp.tMonoNs }
+            sq.rawQuery("SELECT t_run_s, t_local, t_utc_ms FROM v_location ORDER BY t_mono_ns LIMIT 1", null).use { c ->
+                assertThat(c.moveToFirst()).isTrue()
+                val tRun = c.getDouble(0)
+                assertThat(tRun).isWithin(1e-6).of((first.stamp.tMonoNs - SyntheticRun().startMonoNs) / 1e9)
+                val expectLocal = java.time.Instant.ofEpochMilli(c.getLong(2)).atOffset(java.time.ZoneOffset.ofHours(4))
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS")) + "+04:00"
+                assertThat(c.getString(1)).isEqualTo(expectLocal)
             }
         }
+    }
+
+    @Test fun bundleFileNames() {
+        val base = RunRecord("1a2b3c4d-0000", "x", "walk", "android", "m", "16", "1", 1_760_000_000_000L, timeZone = "UTC")
+        assertThat(BundleServiceImpl.bundleFileName(base)).isEqualTo("run_20251009-0853_1a2b3c4d.zip")
+        assertThat(BundleServiceImpl.bundleFileName(base.copy(site = "Main Office", testNumber = 12, timeZone = "Asia/Kolkata")))
+            .isEqualTo("main-office_t12_20251009-1423_1a2b3c4d.zip")
+        assertThat(BundleServiceImpl.offsetText(java.time.ZoneOffset.ofHoursMinutes(-3, -30))).isEqualTo("-03:30")
+        assertThat(BundleServiceImpl.offsetText(java.time.ZoneOffset.UTC)).isEqualTo("+00:00")
     }
 
     @Test fun safeNames() {

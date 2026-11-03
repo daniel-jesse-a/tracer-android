@@ -79,6 +79,19 @@
     <string name="preflight_start">Start run</string>
     <string name="preflight_blocked">Can’t start: grant precise location “all the time” and free up storage first.</string>
 
+    <string name="preflight_site">Site</string>
+    <string name="preflight_site_placeholder">Office</string>
+    <string name="preflight_site_hint">Runs at a site are numbered T1, T2, …</string>
+    <string name="preflight_run_type">Run type</string>
+    <string name="preflight_run_type_free">Free run</string>
+    <string name="preflight_run_type_protocol">Protocol</string>
+    <!-- duration · probe paths, e.g. "fixed settings · 10 min · dual path" -->
+    <string name="preflight_protocol_fixed">fixed settings · %1$s · %2$s</string>
+    <string name="paths_default">default path</string>
+    <string name="paths_dual">dual path</string>
+    <string name="paths_wifi_only">Wi-Fi only</string>
+    <string name="paths_cellular_only">cellular only</string>
+
     <string name="pf_permissions">Permissions</string>
     <string name="pf_permissions_sub_always">%1$d/%2$d · all the time</string>
     <string name="pf_permissions_sub_while">%1$d/%2$d · not all the time</string>
@@ -183,7 +196,20 @@
     <string name="settings_fused">Fused location comparison</string>
     <string name="settings_fused_desc">Also log the fused provider next to raw GPS</string>
     <string name="settings_rtt">Wi-Fi RTT ranging</string>
-    <string name="settings_rtt_desc">802.11mc distance to capable access points</string>
+    <string name="settings_rtt_desc">802.11mc/az distance to access points that support it (on by default)</string>
+    <string name="settings_section_probing">Probing</string>
+    <string name="settings_probe_paths">Probe paths</string>
+    <string name="settings_paths_default">Default</string>
+    <string name="settings_paths_dual">Dual</string>
+    <string name="settings_paths_wifi">Wi-Fi</string>
+    <string name="settings_paths_cellular">Cellular</string>
+    <string name="settings_paths_default_desc">Probes run on the default network only.</string>
+    <string name="settings_paths_dual_desc">Default network plus mobile data in parallel while on Wi-Fi (uses some mobile data).</string>
+    <string name="settings_paths_wifi_desc">Wi-Fi only — probes never fall back to mobile data.</string>
+    <string name="settings_paths_cellular_desc">Mobile data only, even while Wi-Fi is connected.</string>
+    <string name="settings_cellular_budget">Mobile-data budget per run</string>
+    <string name="settings_internal_probes">Internal probes</string>
+    <string name="settings_internal_probes_desc">Ping the default gateway and query each DHCP DNS server</string>
     <string name="settings_section_endpoints">Probe endpoints</string>
     <string name="settings_endpoint_label">Label</string>
     <string name="settings_endpoint_url">URL (https://…)</string>

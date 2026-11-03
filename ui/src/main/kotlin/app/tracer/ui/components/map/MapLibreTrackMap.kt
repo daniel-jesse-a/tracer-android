@@ -193,6 +193,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
                     Expression.get("sev"), Expression.color(android.graphics.Color.WHITE),
                     Expression.stop("critical", Expression.color(colors.bad.toArgb())),
                     Expression.stop("warning", Expression.color(colors.fair.toArgb())),
+                    Expression.stop("waypoint", Expression.color(colors.info.toArgb())),
                 ),
             ),
             PropertyFactory.circleStrokeColor(ground),

@@ -21,7 +21,13 @@
     <string name="live_mode_static">Static</string>
     <string name="live_mode_simulated">Simulated</string>
     <string name="live_mode_custom">Custom</string>
-    <string name="live_mark">Mark moment</string>
+    <string name="live_mark">Mark waypoint (long-press: note)</string>
+    <string name="live_waypoint_title">Waypoint %1$d</string>
+    <string name="live_waypoint_hint">Add label (optional)</string>
+    <string name="live_waypoint_save">Save</string>
+    <string name="live_waypoint_skip">Skip</string>
+    <!-- protocol countdown in the run pill, e.g. "06:12 left" -->
+    <string name="live_protocol_left">%1$s left</string>
     <string name="live_mark_title">Mark this moment</string>
     <string name="live_mark_hint">Optional note</string>
     <string name="live_mark_confirm">Mark</string>
@@ -70,6 +76,7 @@
     <string name="live_lane_wifi">WI-FI</string>
     <string name="live_lane_gnss">GNSS</string>
     <string name="live_lane_events">EVENTS</string>
+    <string name="live_lane_waypoints">WAYPTS</string>
     <string name="live_lane_linked_lat">iP LAT</string>
     <string name="live_lane_linked_rsrp">iP RSRP</string>
     <string name="live_nodata_radio">no radio data</string>
@@ -190,6 +197,12 @@
     <string name="live_replay_rerun_done">Rules re-run: %1$d events</string>
     <string name="live_replay_worst">Worst segments</string>
     <string name="live_replay_export">Export</string>
+    <string name="live_replay_waypoint">Waypoint %1$d</string>
+    <string name="live_replay_waypoint_unlabeled">no label</string>
+    <string name="live_replay_roams">Roams · %1$d</string>
+    <string name="live_replay_roam_down">down</string>
+    <string name="live_replay_roam_penalty">penalty</string>
+    <string name="action_close_waypoint">Close waypoint</string>
     <string name="live_replay_hint">Drag to scrub · pinch to zoom time · tap an event dot for details</string>
 
     <!-- worst segments -->

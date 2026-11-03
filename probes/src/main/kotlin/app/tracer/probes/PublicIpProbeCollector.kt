@@ -20,7 +20,9 @@ import javax.inject.Inject
 
 /**
  * [probe_public_ip] — public IP and ASN (ipinfo.io JSON) at start, every
- * settings.publicIpIntervalMs and after each default-network change (2 s settle).
+ * settings.publicIpIntervalMs and after each default-network change (2 s settle), on every network
+ * of [ProbeNetworks.networksFor] (settings.paths) — so DUAL also yields the mobile-data public IP.
+ * success = reachable; expected_response = 2xx at the end of the chain.
  */
 class PublicIpProbeCollector @Inject constructor(
     private val networks: ProbeNetworks,
@@ -31,63 +33,59 @@ class PublicIpProbeCollector @Inject constructor(
     @OptIn(FlowPreview::class)
     override fun samples(ctx: CollectorContext): Flow<Sample> = channelFlow {
         val settings = ctx.settings.effective()
+        val paths = settings.paths
         val interval = settings.publicIpIntervalMs.coerceAtLeast(10_000L)
         val triggers = Channel<Unit>(Channel.CONFLATED)
         launch {
             networks.defaultNetworkHandles().drop(1).debounce(SETTLE_MS).collect { triggers.trySend(Unit) }
         }
-        while (isActive) {
-            ctx.signals.awaitResumed()
-            val sample = runOnce(ctx)
-            send(sample)
-            ctx.status.sample(id, sample.stamp.tMonoNs)
-            withTimeoutOrNull(interval) { triggers.receive() }
+        networks.acquireFor(paths)
+        try {
+            networks.awaitLease(paths)
+            while (isActive) {
+                ctx.signals.awaitResumed()
+                val targets = networks.networksFor(paths)
+                if (targets.isEmpty()) {
+                    val sample = noNetworkSample(ctx.runId, ctx.clock.now(), "public_ip", settings.publicIpUrl, paths)
+                    send(sample)
+                    ctx.status.sample(id, sample.stamp.tMonoNs)
+                }
+                for (bound in targets) {
+                    val sample = runOnce(ctx, bound)
+                    send(sample)
+                    ctx.status.sample(id, sample.stamp.tMonoNs)
+                }
+                withTimeoutOrNull(interval) { triggers.receive() }
+            }
+        } finally {
+            networks.releaseFor(paths)
         }
     }
 
-    private suspend fun runOnce(ctx: CollectorContext): ProbeSample {
+    private suspend fun runOnce(ctx: CollectorContext, bound: BoundNetwork): ProbeSample {
         val settings = ctx.settings.effective()
         val url = settings.publicIpUrl
         val stamp = ctx.clock.now()
-        val bound = networks.current()
-            ?: return ProbeSample(ctx.runId, stamp, "public_ip", url, success = false, error = "no_network")
         val request = try {
             Request.Builder().url(url).get().header("Accept", "application/json").build()
         } catch (e: IllegalArgumentException) {
-            return ProbeSample(ctx.runId, stamp, "public_ip", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular)
+            return ProbeSample(ctx.runId, stamp, "public_ip", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular, expectedResponse = false)
         }
         val client = networks.client(baseClient, bound.network, 10_000L).newBuilder()
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build() // not a latency KPI: allow slow first connects
         var r = HttpProbe.execute(client, request, BodyMode.Text())
-        var info = if (r.success) r.body?.let(::parseIpInfo) else null
+        var info = if (is2xx(r.code)) r.body?.let(::parseIpInfo) else null
         var endpoint = url
         if (info?.ip == null) {
             // Enterprise networks often block IP-lookup services (ipinfo.io timed out 3/3 on ER-Mobile);
             // Cloudflare's trace endpoint still yields the public IP (ASN unknown).
             val fb = Request.Builder().url(FALLBACK_URL).get().build()
             val r2 = HttpProbe.execute(client, fb, BodyMode.Text())
-            val info2 = if (r2.success) r2.body?.let(::parseCloudflareTrace) else null
+            val info2 = if (is2xx(r2.code)) r2.body?.let(::parseCloudflareTrace) else null
             if (info2 != null) { r = r2; info = info2; endpoint = FALLBACK_URL }
         }
-        val ok = r.success && info?.ip != null
-        return ProbeSample(
-            runId = ctx.runId,
-            stamp = stamp,
-            probeType = "public_ip",
-            endpoint = endpoint,
-            success = ok,
-            error = r.error ?: if (!ok) "io" else null,
-            dnsMs = r.phases.dnsMs,
-            connectMs = r.phases.connectMs,
-            tlsMs = r.phases.tlsMs,
-            ttfbMs = r.phases.ttfbMs,
-            totalMs = r.phases.totalMs,
-            iface = bound.iface,
-            isCellular = bound.isCellular,
-            publicIp = info?.ip,
-            asn = info?.asn,
-            asnOrg = info?.asnOrg,
-        )
+        return r.toProbeSample(ctx.runId, stamp, "public_ip", endpoint, bound, expected = is2xx(r.finalCode))
+            .copy(publicIp = info?.ip, asn = info?.asn, asnOrg = info?.asnOrg)
     }
 
     private companion object {

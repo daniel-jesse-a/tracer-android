@@ -1,6 +1,8 @@
 package app.tracer.probes
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.IOException
@@ -22,12 +24,24 @@ class ProbeLogicTest {
         assertEquals("dns", classifyError(IOException("wrapped", UnknownHostException("x"))))
     }
 
-    @Test fun httpStatusClassification() {
-        assertNull(httpError(200))
-        assertNull(httpError(204))
-        assertEquals("http_503", httpError(503))
-        assertEquals("http_301", httpError(301))
-        assertEquals("http_404", httpError(404))
+    @Test fun statusHelpers() {
+        assertTrue(isRedirect(301)); assertTrue(isRedirect(302)); assertTrue(isRedirect(308))
+        assertFalse(isRedirect(200)); assertFalse(isRedirect(404)); assertFalse(isRedirect(null))
+        assertTrue(is2xx(200)); assertTrue(is2xx(204)); assertFalse(is2xx(302)); assertFalse(is2xx(null))
+    }
+
+    @Test fun transportNames() {
+        assertEquals("wifi", transportName(wifi = true, cellular = false, ethernet = false, vpn = false))
+        assertEquals("cellular", transportName(wifi = false, cellular = true, ethernet = false, vpn = false))
+        assertEquals("ethernet", transportName(wifi = false, cellular = false, ethernet = true, vpn = false))
+        assertEquals("vpn", transportName(wifi = true, cellular = false, ethernet = false, vpn = true))
+        assertEquals("other", transportName(wifi = false, cellular = false, ethernet = false, vpn = false))
+    }
+
+    @Test fun cellularBudget() {
+        assertEquals(500_000_000L, budgetBytes(500))
+        assertEquals(0L, budgetBytes(0))
+        assertEquals(Long.MAX_VALUE, budgetBytes(Long.MAX_VALUE))
     }
 
     @Test fun ipinfoOrgParsing() {

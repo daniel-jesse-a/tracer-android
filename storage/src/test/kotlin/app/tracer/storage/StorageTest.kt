@@ -1,6 +1,7 @@
 package app.tracer.storage
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.RunRecord
@@ -8,6 +9,11 @@ import app.tracer.core.model.Stamp
 import app.tracer.core.model.Table
 import app.tracer.core.export.Bundle
 import app.tracer.core.schema.Schema
+import app.tracer.core.schema.TableDef
+import app.tracer.core.model.CollectorLogSample
+import app.tracer.core.model.WaypointSample
+import app.tracer.core.model.WifiRoamSample
+import app.tracer.storage.db.SqlGuards
 import app.tracer.core.sim.Scenarios
 import app.tracer.core.sim.SyntheticRun
 import app.tracer.storage.db.CanonicalMigrations
@@ -208,5 +214,126 @@ class StorageTest {
         assertThat(CanonicalMigrations.storedVersion(db.openHelper.writableDatabase)).isEqualTo(Schema.VERSION)
         assertThat(tableExists("x_gap")).isTrue()
         assertThat(columns("x_gap")).isEqualTo(Schema.X_GAP.exportColumns)
+    }
+
+    // (5) v2 run fields + test numbers
+    @Test fun v2RunFieldsRoundTripAndNextTestNumber() = runBlocking<Unit> {
+        assertThat(repo.nextTestNumber("Office")).isEqualTo(1)
+        val r = run("a").copy(site = "Office", testNumber = 3, protocol = "walk10-dual", timeZone = "Asia/Dubai", methodFingerprint = "0123456789abcdef")
+        repo.createRun(r)
+        assertThat(repo.getRun("a")).isEqualTo(r)
+        repo.createRun(run("b").copy(site = "office ", testNumber = 7))
+        repo.createRun(run("c").copy(site = "Lab", testNumber = 12))
+        repo.createRun(run("d")) // no site
+        assertThat(repo.nextTestNumber("OFFICE")).isEqualTo(8)
+        assertThat(repo.nextTestNumber("Lab")).isEqualTo(13)
+        assertThat(repo.nextTestNumber("Garage")).isEqualTo(1)
+        repo.updateRun(r.copy(site = "Garage"))
+        assertThat(repo.getRun("a")?.site).isEqualTo("Garage")
+        assertThat(repo.nextTestNumber("Garage")).isEqualTo(4)
+    }
+
+    @Test fun v2SampleTablesRoundTrip() = runBlocking<Unit> {
+        val st = Stamp(1_760_000_000_000L, 9_000_000_000L)
+        val w = WaypointSample(runId, st, 1, "door B", 25.1, 55.2, 6.0, "fused")
+        val roam = WifiRoamSample(runId, st, "Corp", "aa:aa:aa:aa:aa:01", "aa:aa:aa:aa:aa:02", "5", "6", -78, -55, 0L, 12.5, 20.0, 32.5, true, true, false)
+        val log = CollectorLogSample(runId, st, "wifi_scan", "degraded", "throttled", 1)
+        listOf(w, roam, log).forEach { writer.emit(it) }
+        writer.flush()
+        assertThat(repo.samples(runId, Table.WAYPOINT)).containsExactly(w)
+        assertThat(repo.samples(runId, Table.WIFI_ROAM)).containsExactly(roam)
+        assertThat(repo.samples(runId, Table.X_COLLECTOR_LOG)).containsExactly(log)
+    }
+
+    @Test fun canonicalRegistryExcludesRunsAndGuardsExistingColumns() {
+        val v2 = CanonicalMigrations.registry.getValue(1)
+        assertThat(v2).isNotEmpty()
+        assertThat(v2.none { SqlGuards.alterTarget(it)?.first == "runs" }).isTrue()
+        // every column already exists on a fresh v2 database → re-running the step is a no-op
+        val sdb = db.openHelper.writableDatabase
+        CanonicalMigrations.setStoredVersion(sdb, 1)
+        assertThat(CanonicalMigrations.migrate(sdb)).containsExactly(1)
+        assertThat(CanonicalMigrations.storedVersion(sdb)).isEqualTo(Schema.VERSION)
+    }
+
+    // (6) Room v1 → v2 + canonical v1 → v2 on a database written by the v1 app
+    @Test fun migratesV1DatabaseKeepingRows() = runBlocking<Unit> {
+        closeAll()
+        context.deleteDatabase(TracerDatabase.NAME)
+        createV1Database()
+
+        open()
+        val sdb = db.openHelper.writableDatabase
+        for (td in Schema.all) {
+            val expected = if (td.table == Table.RUNS) td.columnNames else td.exportColumns
+            // new columns are appended by ALTER, so existing tables keep v1 order + v2 columns at the end;
+            // compare as a set for those, exactly for tables created fresh.
+            assertWithMessage(td.name).that(columns(td.name)).containsExactlyElementsIn(expected)
+        }
+        for (t in listOf("waypoint", "wifi_roam", "x_android_carrier", "x_collector_log")) assertWithMessage(t).that(tableExists(t)).isTrue()
+        assertThat(CanonicalMigrations.storedVersion(sdb)).isEqualTo(Schema.VERSION)
+        sdb.query("PRAGMA user_version").use { c -> c.moveToFirst(); assertThat(c.getInt(0)).isEqualTo(2) }
+
+        val old = repo.getRun("v1-run")
+        assertThat(old).isNotNull()
+        assertThat(old!!.name).isEqualTo("Old run")
+        assertThat(old.site).isNull()
+        assertThat(old.testNumber).isNull()
+        val probes = repo.samples("v1-run", Table.PROBE)
+        assertThat(probes).hasSize(1)
+        assertThat((probes.single() as app.tracer.core.model.ProbeSample).httpStatus).isNull()
+        assertThat(repo.counts("v1-run")[Table.WIFI_SCAN]).isEqualTo(1L)
+
+        // v2 rows can be written into the upgraded database
+        repo.updateRun(old.copy(site = "Office", testNumber = 1))
+        assertThat(repo.nextTestNumber("office")).isEqualTo(2)
+        val w = WaypointSample("v1-run", Stamp(1, 2), 1, null)
+        writer.emit(w); writer.flush()
+        assertThat(repo.samples("v1-run", Table.WAYPOINT)).containsExactly(w)
+
+        // re-opening a migrated database is a no-op
+        closeAll()
+        open()
+        assertThat(repo.getRun("v1-run")?.site).isEqualTo("Office")
+    }
+
+    /** Writes `tracer.db` exactly as the v1 app left it: Room user_version 1, v1 runs, v1 canonical DDL, meta = 1. */
+    private fun createV1Database() {
+        val v2Cols: Map<String, Set<String>> = Schema.migrationSql(1).mapNotNull { SqlGuards.alterTarget(it) }
+            .groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
+        val newTables = setOf(Table.WAYPOINT, Table.WIFI_ROAM, Table.X_ANDROID_CARRIER, Table.X_COLLECTOR_LOG)
+        fun v1(td: TableDef) = td.copy(columns = td.columns.filterNot { it.name in v2Cols[td.name].orEmpty() })
+        val file = context.getDatabasePath(TracerDatabase.NAME).apply { parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { raw ->
+            for (td in Schema.all) {
+                if (td.table in newTables) continue
+                val d = v1(td)
+                raw.execSQL(d.createSql(ifNotExists = false))
+                d.indexSql().forEach { raw.execSQL(it) }
+            }
+            raw.execSQL("CREATE TABLE tracer_meta (key TEXT PRIMARY KEY, value TEXT)")
+            raw.execSQL("INSERT INTO tracer_meta (key, value) VALUES ('schema_version', '1')")
+            raw.execSQL(
+                "INSERT INTO runs (run_id, t_utc_ms, t_mono_ns, name, mode, device_platform, device_model, os_version, app_version, started_at, ended_at) " +
+                    "VALUES ('v1-run', 1000, 5, 'Old run', 'walk', 'android', 'Pixel 9', '16', '1.0.8', 1000, 2000)",
+            )
+            raw.execSQL(
+                "INSERT INTO probe (run_id, t_utc_ms, t_mono_ns, probe_type, endpoint, success, total_ms) " +
+                    "VALUES ('v1-run', 1100, 100000000, 'latency', 'https://cp.cloudflare.com/generate_204', 1, 42.0)",
+            )
+            raw.execSQL(
+                "INSERT INTO wifi_scan (run_id, t_utc_ms, t_mono_ns, scan_id, bssid, rssi_dbm, frequency_mhz) " +
+                    "VALUES ('v1-run', 1200, 200000000, 1, 'aa:bb:cc:dd:ee:ff', -60, 5180)",
+            )
+            raw.version = 1
+        }
+        // sanity: really v1
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { ro ->
+            ro.rawQuery("PRAGMA table_info(runs)", null).use { c ->
+                val n = c.getColumnIndexOrThrow("name")
+                val cols = buildList { while (c.moveToNext()) add(c.getString(n)) }
+                assertThat(cols).doesNotContain("site")
+            }
+        }
     }
 }

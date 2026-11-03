@@ -28,6 +28,13 @@ fun completenessBadges(run: RunRecord): List<Pair<String, BadgeState>> {
     }
 }
 
+/** List/card title: "Office · T4" for site runs, else the stored run name. */
+fun runTitle(run: RunRecord): String {
+    val site = run.site?.trim()?.takeIf { it.isNotEmpty() }
+    val n = run.testNumber
+    return if (site != null && n != null) "$site · T$n" else run.name
+}
+
 /** Mode tag for Mono meta lines: rail → TRAIN, drive → CAR, … */
 fun modeTag(mode: String): String = when (mode) {
     "rail" -> "TRAIN"

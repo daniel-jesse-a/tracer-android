@@ -32,6 +32,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.tracer.core.config.ProbePaths
 import app.tracer.core.config.RunSettings
 import app.tracer.core.sim.Scenarios
 import app.tracer.ui.R
@@ -121,6 +125,11 @@ private fun SettingsForm(s: RunSettings, sim: String?, vm: SettingsViewModel, mo
         SwitchRow(stringResource(R.string.settings_fused), stringResource(R.string.settings_fused_desc), s.useFusedComparison) { v -> vm.update { it.copy(useFusedComparison = v) } }
         SwitchRow(stringResource(R.string.settings_rtt), stringResource(R.string.settings_rtt_desc), s.wifiRttEnabled) { v -> vm.update { it.copy(wifiRttEnabled = v) } }
 
+        SectionHeader(stringResource(R.string.settings_section_probing))
+        ProbePathsSelector(s.paths) { p -> vm.update { it.copy(probePaths = p, dualPathProbing = p == ProbePaths.DUAL) } }
+        NumberField(stringResource(R.string.settings_cellular_budget), s.cellularDataBudgetMb, stringResource(R.string.unit_mb), 10, 100_000) { v -> vm.update { it.copy(cellularDataBudgetMb = v) } }
+        SwitchRow(stringResource(R.string.settings_internal_probes), stringResource(R.string.settings_internal_probes_desc), s.internalProbes) { v -> vm.update { it.copy(internalProbes = v) } }
+
         SectionHeader(stringResource(R.string.settings_section_endpoints))
         EndpointsEditor(s, vm)
         TextSetting(stringResource(R.string.settings_throughput_url), s.throughputUrl) { v -> if (v.isNotBlank()) vm.update { it.copy(throughputUrl = v.trim()) } }
@@ -143,6 +152,45 @@ private fun SettingsForm(s: RunSettings, sim: String?, vm: SettingsViewModel, mo
             ScenarioPicker(sim, vm::setSimScenario)
         }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+private val PATH_OPTIONS = listOf(
+    ProbePaths.DEFAULT to R.string.settings_paths_default,
+    ProbePaths.DUAL to R.string.settings_paths_dual,
+    ProbePaths.WIFI_ONLY to R.string.settings_paths_wifi,
+    ProbePaths.CELLULAR_ONLY to R.string.settings_paths_cellular,
+)
+
+/** Default | Dual | Wi-Fi only | Cellular only → RunSettings.probePaths, with a one-line explanation of the choice. */
+@Composable
+private fun ProbePathsSelector(current: ProbePaths, onSelect: (ProbePaths) -> Unit) {
+    Column {
+        Text(stringResource(R.string.settings_probe_paths), style = MaterialTheme.typography.bodyLarge)
+        Spacer(Modifier.height(6.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            PATH_OPTIONS.forEachIndexed { i, (p, label) ->
+                SegmentedButton(
+                    selected = current == p,
+                    onClick = { onSelect(p) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = PATH_OPTIONS.size),
+                    icon = {},
+                ) { Text(stringResource(label), maxLines = 1) }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(
+                when (current) {
+                    ProbePaths.DEFAULT -> R.string.settings_paths_default_desc
+                    ProbePaths.DUAL -> R.string.settings_paths_dual_desc
+                    ProbePaths.WIFI_ONLY -> R.string.settings_paths_wifi_desc
+                    ProbePaths.CELLULAR_ONLY -> R.string.settings_paths_cellular_desc
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -27,13 +27,27 @@ class MappingsTest {
         assertEquals("UNKNOWN", ratOf(0, 4 /* CDMA */))
     }
 
-    @Test fun nrStatePicksMostAdvancedEntry() {
-        val text = "{mVoiceRegState=0(IN_SERVICE), NetworkRegistrationInfo{ domain=CS nrState=NONE} " +
-            "NetworkRegistrationInfo{ domain=PS transportType=WWAN nrState=CONNECTED}}"
-        assertEquals("connected", parseNrState(text))
-        assertEquals("not_restricted", parseNrState("nrState=NOT_RESTRICTED"))
-        assertNull(parseNrState("no nr here"))
-        assertNull(parseNrState(null))
+    @Test fun scanFeaturesFromElements() {
+        val rm = 70 to byteArrayOf(0x73, 0, 0, 0, 0)
+        val extBtm = 127 to byteArrayOf(0x04, 0x00, 0x08, 0x00) // bit 19
+        val extNoBtm = 127 to byteArrayOf(0x04, 0x00, 0x00, 0x00)
+        val md = 54 to byteArrayOf(0x12, 0x34, 0x01)
+        assertEquals("11k,11v,11r", scanFeatures(listOf(md, extBtm, rm), "[WPA2-PSK-CCMP][ESS]"))
+        assertEquals("11k", scanFeatures(listOf(rm, extNoBtm), null))
+        assertEquals("11v", scanFeatures(listOf(extBtm), "[WPA2-PSK-CCMP]"))
+        assertEquals("11r", scanFeatures(emptyList(), "[WPA2-PSK+FT/PSK-CCMP][RSN-PSK+FT/PSK-CCMP][ESS]"))
+        assertEquals("11r", scanFeatures(emptyList(), "[RSN-SAE+FT/SAE-CCMP][ESS]"))
+        assertNull(scanFeatures(listOf(127 to byteArrayOf(0x04, 0x00)), "[ESS]")) // too short for octet 2
+        assertNull(scanFeatures(emptyList(), null))
+    }
+
+    @Test fun transportNames() {
+        assertEquals("wifi", transportNameOf(listOf("wifi")))
+        assertEquals("cellular", transportNameOf(listOf("cellular")))
+        assertEquals("vpn", transportNameOf(listOf("wifi", "vpn")))
+        assertEquals("ethernet", transportNameOf(listOf("ethernet")))
+        assertEquals("other", transportNameOf(listOf("bluetooth")))
+        assertNull(transportNameOf(emptyList()))
     }
 
     @Test fun securityTypes() {

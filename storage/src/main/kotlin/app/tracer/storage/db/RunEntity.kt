@@ -28,6 +28,12 @@ data class RunEntity(
     @ColumnInfo(name = "gps_offset_ms_end") val gpsOffsetMsEnd: Long?,
     @ColumnInfo(name = "ntp_offset_ms") val ntpOffsetMs: Long?,
     @ColumnInfo(name = "completeness_json") val completenessJson: String?,
+    // v2 (nullable, appended in Schema.RUNS order; added to existing databases by TracerDatabase.MIGRATION_1_2)
+    @ColumnInfo(name = "site") val site: String? = null,
+    @ColumnInfo(name = "test_number") val testNumber: Int? = null,
+    @ColumnInfo(name = "protocol") val protocol: String? = null,
+    @ColumnInfo(name = "time_zone") val timeZone: String? = null,
+    @ColumnInfo(name = "method_fingerprint") val methodFingerprint: String? = null,
 ) {
     fun toRecord(): RunRecord = RunRecord(
         runId = runId,
@@ -47,6 +53,11 @@ data class RunEntity(
         completenessJson = completenessJson,
         tUtcMs = tUtcMs,
         tMonoNs = tMonoNs,
+        site = site,
+        testNumber = testNumber,
+        protocol = protocol,
+        timeZone = timeZone,
+        methodFingerprint = methodFingerprint,
     )
 
     companion object {
@@ -68,6 +79,11 @@ data class RunEntity(
             gpsOffsetMsEnd = r.gpsOffsetMsEnd,
             ntpOffsetMs = r.ntpOffsetMs,
             completenessJson = r.completenessJson,
+            site = r.site,
+            testNumber = r.testNumber,
+            protocol = r.protocol,
+            timeZone = r.timeZone,
+            methodFingerprint = r.methodFingerprint,
         )
     }
 }

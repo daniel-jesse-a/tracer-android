@@ -6,6 +6,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.tracer.core.config.RunSettings
 import app.tracer.core.model.RunState
+import app.tracer.core.model.Stamp
+import app.tracer.core.model.Table
+import app.tracer.core.model.WaypointSample
 import app.tracer.core.runtime.RunController
 import app.tracer.core.runtime.RunRepository
 import dagger.hilt.android.testing.HiltAndroidRule
@@ -15,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -23,8 +27,8 @@ import javax.inject.Inject
 
 /**
  * End-to-end RunService lifecycle on a device/emulator using the debug "Simulate run" mode, so no
- * real radio conditions are needed: start → RECORDING with events → pause → resume → stop → IDLE
- * with endedAt persisted.
+ * real radio conditions are needed: start (with a site) → RECORDING with events → waypoint → pause →
+ * resume → stop → IDLE with endedAt, site/test number/time zone/method fingerprint persisted.
  */
 @HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
@@ -65,13 +69,18 @@ class RunServiceLifecycleTest {
     fun simulatedRun_startPauseResumeStop() = runBlocking<Unit> {
         assertEquals(RunState.IDLE, controller.state.value)
 
-        controller.start("Lifecycle test", "drive", RunSettings(), simulateScenario = "congestion")
+        val site = "Lifecycle"
+        val expectedTest = repository.nextTestNumber(site)
+        controller.start("Lifecycle test", "drive", RunSettings(), simulateScenario = "congestion", site = site, protocolId = null)
         withTimeout(90_000) {
             controller.state.first { it == RunState.RECORDING }
             controller.live.first { it.eventCount > 0 } // congestion scenario fires latency events at t≈40 s
         }
         val runId = controller.runId.value
         assertNotNull(runId)
+
+        val tap = Stamp(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
+        controller.markWaypoint("door B", tap)
 
         controller.pause()
         withTimeout(15_000) { controller.state.first { it == RunState.PAUSED } }
@@ -87,5 +96,19 @@ class RunServiceLifecycleTest {
         assertNotNull("endedAt must be set after stop", run!!.endedAt)
         assertEquals("simulated", run.mode)
         assertNotNull(run.completenessJson)
+        assertEquals(site, run.site)
+        assertEquals(expectedTest, run.testNumber)
+        assertTrue(run.name, run.name.startsWith("$site · T$expectedTest · "))
+        assertNotNull(run.timeZone)
+        assertNotNull(run.methodFingerprint)
+        assertEquals(null, run.protocol)
+
+        val waypoints = repository.samples(runId, Table.WAYPOINT).filterIsInstance<WaypointSample>()
+        assertEquals(1, waypoints.size)
+        assertEquals(1, waypoints.single().seq)
+        assertEquals("door B", waypoints.single().label)
+        assertEquals(tap.tMonoNs, waypoints.single().stamp.tMonoNs)
+        // collector health is no longer written as annotations
+        assertTrue(repository.samples(runId, Table.ANNOTATION).none { (it as? app.tracer.core.model.AnnotationSample)?.text?.startsWith("collector:") == true })
     }
 }

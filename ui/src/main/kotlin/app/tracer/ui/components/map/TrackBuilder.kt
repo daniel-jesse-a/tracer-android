@@ -17,6 +17,22 @@ object TrackBuilder {
     /** GNSS epochs: (t_mono_ns, used-in-fix count), one per distinct timestamp, ascending. */
     data class GnssEpochs(val t: LongArray, val used: IntArray)
 
+    /**
+     * Streaming form of [gnssEpochs] for long runs: feed satellite rows one by one (any order) and
+     * keep only (epoch → used count), never the rows themselves.
+     */
+    class GnssEpochAccumulator {
+        private val used = HashMap<Long, Int>()
+        fun add(s: GnssSatelliteSample) {
+            val t = s.stamp.tMonoNs
+            used[t] = (used[t] ?: 0) + if (s.usedInFix) 1 else 0
+        }
+        fun build(): GnssEpochs {
+            val ts = used.keys.toLongArray().also { it.sort() }
+            return GnssEpochs(ts, IntArray(ts.size) { used.getValue(ts[it]) })
+        }
+    }
+
     fun gnssEpochs(sats: List<GnssSatelliteSample>): GnssEpochs {
         val sorted = sats.sortedBy { it.stamp.tMonoNs }
         val ts = ArrayList<Long>()

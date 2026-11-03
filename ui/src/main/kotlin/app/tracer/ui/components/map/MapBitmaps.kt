@@ -15,6 +15,7 @@ internal object MapBitmaps {
     fun pinColor(severity: String, c: TracerExtraColors): Color = when (severity) {
         "critical" -> c.bad
         "warning" -> c.fair
+        "waypoint" -> c.info // user waypoint (Replay)
         else -> Color.White
     }
 

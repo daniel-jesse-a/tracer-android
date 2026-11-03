@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.Context
 import android.content.ActivityNotFoundException
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,7 +41,11 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
@@ -57,6 +63,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,6 +98,8 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit
     val stats by vm.stats.collectAsStateWithLifecycle()
     val run by vm.run.collectAsStateWithLifecycle()
     val selectedSub by vm.selectedSub.collectAsStateWithLifecycle()
+    val protocol by vm.protocol.collectAsStateWithLifecycle()
+    val pendingWaypoint by vm.pendingWaypoint.collectAsStateWithLifecycle()
     val ended by rememberUpdatedState(onRunEnded)
     LaunchedEffect(vm) { vm.ended.collect { ended(it) } }
 
@@ -117,6 +128,8 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit
                         state = state,
                         mode = modeLabel(run?.mode),
                         distance = Fmt.distance(snap.distanceM),
+                        // protocol countdown: fixed duration − recorded (un-paused) time
+                        remainingMs = protocol?.let { p -> (p.durationS * 1_000L - snap.elapsedMs).coerceAtLeast(0L) },
                     )
                     LayerChips(layer, vm::setLayer)
                 }
@@ -139,7 +152,8 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit
             }
             LiveActionRow(
                 state = state, enabled = active,
-                onMark = { showMark = true },
+                onMark = vm::tapWaypoint,
+                onMarkLong = { showMark = true },
                 onPauseResume = { if (state == RunState.PAUSED) vm.resume() else vm.pause() },
                 onEnd = { showEnd = true },
             )
@@ -147,6 +161,7 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit
     }
 
     if (showMark) MarkMomentDialog(onDismiss = { showMark = false }, onConfirm = { note -> vm.markMoment(note); showMark = false })
+    pendingWaypoint?.let { p -> WaypointSheet(p, onCommit = vm::commitWaypoint) }
     if (showEnd) {
         AlertDialog(
             onDismissRequest = { showEnd = false },
@@ -209,9 +224,16 @@ internal fun LayerChips(layer: MapLayer, onLayer: (MapLayer) -> Unit, modifier: 
     }
 }
 
-/** Floating 28 dp pill: red dot · 00:42:17 · Train · 61.4 km */
+/** "06:12" under an hour, "1:54:12" above; rounded up so it never reads 00:00 while running. */
+internal fun remainingLabel(ms: Long): String {
+    val total = (ms.coerceAtLeast(0) + 999) / 1000
+    return if (total >= 3600) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+    else String.format(java.util.Locale.ROOT, "%02d:%02d", total / 60, total % 60)
+}
+
+/** Floating 28 dp pill: red dot · 00:42:17 · Train · 61.4 km [· 06:12 left] */
 @Composable
-private fun RunPill(elapsedMs: Long, state: RunState, mode: String, distance: String) {
+private fun RunPill(elapsedMs: Long, state: RunState, mode: String, distance: String, remainingMs: Long? = null) {
     val colors = LocalTracerColors.current
     Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -227,21 +249,73 @@ private fun RunPill(elapsedMs: Long, state: RunState, mode: String, distance: St
             val sub = listOf(mode, distance).filter { it.isNotEmpty() }.joinToString(" · ")
             val text = if (state == RunState.PAUSED) stringResource(R.string.live_state_paused) + " · " + sub else sub
             Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (remainingMs != null) {
+                Spacer(Modifier.width(8.dp))
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(
+                        stringResource(R.string.live_protocol_left, remainingLabel(remainingMs)),
+                        style = Mono.small,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
 }
 
-/** Square tonal Mark · square tonal Pause · wide End-run pill in errorContainer. */
+/** "Waypoint N · add label (optional)" — Save / Skip both record the waypoint with its tap time; dismiss = Skip. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LiveActionRow(state: RunState, enabled: Boolean, onMark: () -> Unit, onPauseResume: () -> Unit, onEnd: () -> Unit) {
+private fun WaypointSheet(p: PendingWaypoint, onCommit: (String?) -> Unit) {
+    var label by rememberSaveable(p.tappedAt.tMonoNs) { mutableStateOf("") }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = { onCommit(null) }, sheetState = sheet) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.l)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.live_waypoint_title, p.number), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(Fmt.timestamp(p.tappedAt.tUtcMs), style = Mono.small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(Space.m))
+            OutlinedTextField(
+                value = label, onValueChange = { label = it.take(80) },
+                placeholder = { Text(stringResource(R.string.live_waypoint_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.m))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.End)) {
+                TextButton(onClick = { onCommit(null) }) { Text(stringResource(R.string.live_waypoint_skip)) }
+                Button(onClick = { onCommit(label) }) { Text(stringResource(R.string.live_waypoint_save)) }
+            }
+        }
+    }
+}
+
+/** Square tonal Mark (tap = waypoint, long-press = note) · square tonal Pause · wide End-run pill in errorContainer. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LiveActionRow(state: RunState, enabled: Boolean, onMark: () -> Unit, onMarkLong: () -> Unit, onPauseResume: () -> Unit, onEnd: () -> Unit) {
     val square = RoundedCornerShape(16.dp)
     Row(
         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.l, vertical = Space.m),
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FilledTonalIconButton(onClick = onMark, enabled = enabled, shape = square, modifier = Modifier.size(56.dp)) {
-            Icon(Icons.Filled.Bookmark, contentDescription = stringResource(R.string.live_mark))
+        // Tonal square like the icon buttons, but with a long-press (FilledTonalIconButton has none).
+        val markCd = stringResource(R.string.live_mark)
+        val container = if (enabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        val content = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(square)
+                .background(container)
+                .combinedClickable(enabled = enabled, role = Role.Button, onClick = onMark, onLongClick = onMarkLong)
+                .semantics { contentDescription = markCd },
+            contentAlignment = Alignment.Center,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides content) { Icon(Icons.Filled.Bookmark, contentDescription = null) }
         }
         val paused = state == RunState.PAUSED
         FilledTonalIconButton(onClick = onPauseResume, enabled = enabled, shape = square, modifier = Modifier.size(56.dp)) {

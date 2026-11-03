@@ -69,6 +69,8 @@ private data class View(val start: Long, val end: Long) { val span: Long get() =
  * @param height lane height
  * @param onEventTap tap in the EVENTS lane near a dot → its index in [events]
  * @param originNs axis labels show time since this instant
+ * @param waypoints t_mono_ns of user waypoints → a WAYPTS tick lane under EVENTS (only drawn when non-empty)
+ * @param onWaypointTap tap in the WAYPTS lane near a tick → its index in [waypoints]
  */
 @Composable
 fun TimelineChart(
@@ -84,11 +86,15 @@ fun TimelineChart(
     originNs: Long = startNs,
     zoomable: Boolean = true,
     showAxis: Boolean = true,
+    waypoints: List<Long> = emptyList(),
+    onWaypointTap: ((Int) -> Unit)? = null,
 ) {
     val cursor = rememberUpdatedState(cursorNs)
     val scrub by rememberUpdatedState(onScrub)
     val eventTap by rememberUpdatedState(onEventTap)
     val evs by rememberUpdatedState(events)
+    val wps by rememberUpdatedState(waypoints)
+    val waypointTap by rememberUpdatedState(onWaypointTap)
     var view by remember(startNs, endNs) { mutableStateOf(View(startNs, endNs.coerceAtLeast(startNs + 1))) }
     val density = LocalDensity.current
     val gutterPx = with(density) { GUTTER.toPx() }
@@ -145,16 +151,26 @@ fun TimelineChart(
                         val p = down.position
                         val tap = eventTap
                         val eventsTop = laneCount * lanePx
-                        if (tap != null && p.y >= eventsTop && p.y <= eventsTop + lanePx) {
+                        fun nearest(ts: List<Long>): Int {
                             val v = view
                             var best = -1
                             var bestD = Float.MAX_VALUE
-                            evs.forEachIndexed { i, (t, _) ->
+                            ts.forEachIndexed { i, t ->
                                 val x = gutterPx + (t - v.start).toFloat() / v.span * plotW
                                 val d = abs(x - p.x)
                                 if (d < bestD) { bestD = d; best = i }
                             }
-                            if (best >= 0 && bestD <= 22.dp.toPx()) { tap(best); return@awaitEachGesture }
+                            return if (best >= 0 && bestD <= 22.dp.toPx()) best else -1
+                        }
+                        if (tap != null && p.y >= eventsTop && p.y <= eventsTop + lanePx) {
+                            val best = nearest(evs.map { it.first })
+                            if (best >= 0) { tap(best); return@awaitEachGesture }
+                        }
+                        val wTap = waypointTap
+                        val wTop = eventsTop + lanePx
+                        if (wTap != null && wps.isNotEmpty() && p.y >= wTop && p.y <= wTop + lanePx) {
+                            val best = nearest(wps)
+                            if (best >= 0) { wTap(best); return@awaitEachGesture }
                         }
                         scrub?.invoke(toNs(p.x))
                     }
@@ -165,6 +181,7 @@ fun TimelineChart(
             Lane(s, view, cursor, height)
         }
         EventLane(events, view, cursor, height)
+        if (waypoints.isNotEmpty()) WaypointLane(waypoints, view, cursor, height)
         if (showAxis) Axis(view, originNs)
     }
 }
@@ -390,6 +407,30 @@ private fun EventLane(events: List<Pair<Long, String>>, v: View, cursor: State<L
         Canvas(Modifier.weight(1f).fillMaxHeight().onSizeChanged { w = it.width }) {
             val cy = size.height / 2
             for (i in dots.xs.indices) drawCircle(dots.colors[i], dots.radii[i], Offset(dots.xs[i], cy))
+            drawCursor(cursor.value, v, cursorColor)
+        }
+    }
+}
+
+/** Waypoint ticks: short vertical bars (shape differs from the event dots, not colour alone). */
+@Composable
+private fun WaypointLane(waypoints: List<Long>, v: View, cursor: State<Long?>, height: Dp) {
+    var w by remember { mutableIntStateOf(0) }
+    val xs = remember(waypoints, v, w) {
+        val inRange = waypoints.filter { it in v.start..v.end }
+        val span = v.span.toFloat()
+        FloatArray(inRange.size) { (inRange[it] - v.start) / span * w }
+    }
+    val tick = LocalTracerColors.current.info
+    val cursorColor = MaterialTheme.colorScheme.primary
+    val density = LocalDensity.current
+    Row(Modifier.fillMaxWidth().height(height), verticalAlignment = Alignment.CenterVertically) {
+        Gutter(stringResource(R.string.live_lane_waypoints), true) { null }
+        Canvas(Modifier.weight(1f).fillMaxHeight().onSizeChanged { w = it.width }) {
+            val stroke = with(density) { 2.5.dp.toPx() }
+            val top = size.height * 0.2f
+            val bottom = size.height * 0.8f
+            for (x in xs) drawLine(tick, Offset(x, top), Offset(x, bottom), strokeWidth = stroke, cap = StrokeCap.Round)
             drawCursor(cursor.value, v, cursorColor)
         }
     }

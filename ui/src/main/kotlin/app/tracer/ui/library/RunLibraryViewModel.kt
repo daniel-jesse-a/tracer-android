@@ -18,6 +18,7 @@ import app.tracer.core.runtime.RunRepository
 import app.tracer.core.util.Geo
 import app.tracer.ui.R
 import app.tracer.ui.common.UiText
+import app.tracer.ui.common.runTitle
 import app.tracer.ui.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -88,14 +89,16 @@ class RunLibraryViewModel @Inject constructor(
     private val extrasPermits = Semaphore(2)
 
     /**
-     * Search matches run name, mode and run id. PCI/SSID search would need a per-run scan of the
-     * cell/Wi-Fi tables and is intentionally not done here.
+     * Search matches run name, site (and the "Site · T#" title), mode, protocol and run id. PCI/SSID
+     * search would need a per-run scan of the cell/Wi-Fi tables and is intentionally not done here.
      */
     val visible: StateFlow<List<RunListItem>> = combine(runs, _query, _filter, _extras) { list, q, f, ex ->
         val weekStart = startOfWeek()
         (list ?: emptyList()).filter { item ->
             val r = item.run
-            val matches = q.isBlank() || r.name.contains(q, true) || r.mode.contains(q, true) || r.runId.startsWith(q, true)
+            val matches = q.isBlank() || r.name.contains(q, true) || r.site?.contains(q, true) == true ||
+                runTitle(r).contains(q, true) || r.mode.contains(q, true) || r.protocol?.contains(q, true) == true ||
+                r.runId.startsWith(q, true)
             matches && when (f) {
                 RunFilter.ALL -> true
                 RunFilter.TRAIN -> r.mode == "rail"

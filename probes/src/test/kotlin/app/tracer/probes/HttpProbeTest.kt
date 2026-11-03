@@ -60,19 +60,78 @@ class HttpProbeTest {
         assertEquals("HEAD", server.takeRequest().method)
     }
 
-    @Test fun http503IsClassified() = runBlocking<Unit> {
+    @Test fun http503IsReachable() = runBlocking<Unit> {
+        // v2: any HTTP response = reachable; the status is reported, it is not a transport error.
         server.enqueue(MockResponse.Builder().code(503).build())
         val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl()).head().build())
-        assertFalse(r.success)
+        assertTrue(r.success)
         assertEquals(503, r.code)
-        assertEquals("http_503", r.error)
+        assertNull(r.error)
+        assertEquals(0, r.redirectCount)
+        assertEquals(503, r.finalCode)
+        assertEquals(localhostUrl().toString(), r.finalUrl)
     }
 
-    @Test fun redirectIsNotFollowed() = runBlocking<Unit> {
+    @Test fun notFoundIsReachable() = runBlocking<Unit> {
+        server.enqueue(MockResponse.Builder().code(404).build())
+        val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl()).get().build())
+        assertTrue(r.success)
+        assertEquals(404, r.code)
+        assertNull(r.error)
+    }
+
+    @Test fun redirectIsFollowedUntimed() = runBlocking<Unit> {
+        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/hop2").build())
+        server.enqueue(MockResponse.Builder().code(301).addHeader("Location", "/final").build())
+        server.enqueue(MockResponse.Builder().code(204).build())
+        val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl("/start")).head().build())
+        assertTrue(r.success)
+        assertNull(r.error)
+        assertEquals("http_status is the first, timed hop", 302, r.code)
+        assertEquals(2, r.redirectCount)
+        assertEquals(204, r.finalCode)
+        assertEquals(localhostUrl("/final").toString(), r.finalUrl)
+        assertNotNull(r.phases.totalMs)
+        assertEquals("/start", server.takeRequest().url.encodedPath)
+        assertEquals("/hop2", server.takeRequest().url.encodedPath)
+        val last = server.takeRequest()
+        assertEquals("/final", last.url.encodedPath)
+        assertEquals("HEAD", last.method)
+    }
+
+    @Test fun redirectChainIsCappedAtFive() = runBlocking<Unit> {
+        repeat(8) { i -> server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/r${i + 1}").build()) }
+        val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl("/r0")).get().build())
+        assertTrue(r.success)
+        assertEquals(302, r.code)
+        assertEquals(MAX_REDIRECTS, r.redirectCount)
+        assertEquals(302, r.finalCode)
+        assertEquals(localhostUrl("/r5").toString(), r.finalUrl)
+        assertEquals(1 + MAX_REDIRECTS, server.requestCount)
+    }
+
+    @Test fun redirectNotFollowedWhenDisabled() = runBlocking<Unit> {
         server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/elsewhere").build())
-        val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl()).get().build(), isSuccess = { it == 204 })
-        assertFalse(r.success)
-        assertEquals("http_302", r.error)
+        val r = HttpProbe.execute(client, Request.Builder().url(localhostUrl()).get().build(), followRedirects = false)
+        assertTrue(r.success)
+        assertEquals(302, r.code)
+        assertEquals(0, r.redirectCount)
+        assertEquals(302, r.finalCode)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun failedFollowUpKeepsFirstHop() = runBlocking<Unit> {
+        ServerSocket(0, 50, loopback).use { silent ->
+            server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "http://localhost:${silent.localPort}/portal").build())
+            val fast = client.newBuilder().callTimeout(500, TimeUnit.MILLISECONDS).build()
+            val r = HttpProbe.execute(fast, Request.Builder().url(localhostUrl()).get().build())
+            assertTrue(r.success)
+            assertNull(r.error)
+            assertEquals(302, r.code)
+            assertEquals(1, r.redirectCount)
+            assertNull(r.finalCode)
+            assertEquals("http://localhost:${silent.localPort}/portal", r.finalUrl)
+        }
     }
 
     @Test fun silentServerTimesOut() = runBlocking<Unit> {

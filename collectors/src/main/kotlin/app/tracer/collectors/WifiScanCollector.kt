@@ -31,6 +31,7 @@ import javax.inject.Inject
 /**
  * [wifi_scan] — periodic WifiManager.startScan(); every fresh result set (including scans
  * triggered by other apps) becomes WifiScanSample rows sharing one Stamp, scanId = stamp.tUtcMs.
+ * features = 11k/11v/11r from the AP's information elements (see [scanFeatures]).
  * Two consecutive failed scans mark the collector degraded and set [WifiScanCache.throttled].
  */
 class WifiScanCollector @Inject constructor(
@@ -99,6 +100,7 @@ class WifiScanCollector @Inject constructor(
                         channelWidth = WifiMath.widthOf(r.channelWidth),
                         standard = WifiMath.standardOf(r.wifiStandard, r.frequency),
                         capabilities = r.capabilities,
+                        features = featuresOf(r),
                     )
                     if (!channel.emitFromCallback(ctx, id, sample)) break
                 }
@@ -128,6 +130,20 @@ class WifiScanCollector @Inject constructor(
             worker.quit()
         }
     }.buffer(512)
+
+    /** 11k/11v/11r from the AP's IEs (ScanResult.getInformationElements, API 30+) and AKMs. */
+    private fun featuresOf(r: ScanResult): String? {
+        val elements = frameworkCall { r.informationElements }.orEmpty()
+            .filter { it.id == ElementId.RM_ENABLED_CAPABILITIES || it.id == ElementId.EXTENDED_CAPABILITIES || it.id == ElementId.MOBILITY_DOMAIN }
+            .map { ie ->
+                // duplicate(): the framework's buffer is shared — never consume its position.
+                val buf = ie.bytes.duplicate()
+                val octets = ByteArray(buf.remaining())
+                buf.get(octets)
+                ie.id to octets
+            }
+        return scanFeatures(elements, r.capabilities)
+    }
 
     private fun ssidOf(r: ScanResult): String? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

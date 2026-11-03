@@ -269,6 +269,24 @@ class RoomRunRepository @Inject constructor(
         return n
     }
 
+    /**
+     * max(test_number) + 1 over runs whose site equals [site] ignoring case (and surrounding
+     * whitespace); 1 when there are none. Compared in Kotlin, not with SQLite NOCASE (ASCII-only),
+     * so "Büro" and "BÜRO" are the same site. The runs table is small (one row per run).
+     */
+    override suspend fun nextTestNumber(site: String): Int = withContext(io) {
+        val want = site.trim()
+        var max = 0
+        readable().query(
+            "SELECT site, test_number FROM ${Schema.RUNS.name} WHERE site IS NOT NULL AND test_number IS NOT NULL",
+        ).use { c ->
+            while (c.moveToNext()) {
+                if (c.getString(0).trim().equals(want, ignoreCase = true)) max = maxOf(max, c.getInt(1))
+            }
+        }
+        max + 1
+    }
+
     private fun deleteRunRows(db: SupportSQLiteDatabase, runId: String) {
         for (td in Schema.all) {
             db.execSQL("DELETE FROM ${td.name} WHERE run_id = ?", arrayOf<Any?>(runId))

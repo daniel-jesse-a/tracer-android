@@ -22,6 +22,14 @@ internal class RunHeartbeat(context: Context) {
         val pausedAtMonoNs: Long,
         val pausedMsTotal: Long,
         val gapMsTotal: Long,
+        /** Protocol run: its id, so a resumed service keeps the fixed duration + auto-stop. */
+        val protocolId: String? = null,
+        /**
+         * Projected wall-clock end of the protocol run (start + duration + pauses/gaps so far),
+         * rewritten with every heartbeat; 0 = not a protocol run. Auto-stop itself is decided on
+         * recorded (un-paused) time, so a pause or a process restart never shortens the protocol.
+         */
+        val protocolEndUtcMs: Long = 0L,
     )
 
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -41,6 +49,8 @@ internal class RunHeartbeat(context: Context) {
             .putLong(K_PAUSED_AT_MONO, s.pausedAtMonoNs)
             .putLong(K_PAUSED_MS, s.pausedMsTotal)
             .putLong(K_GAP_MS, s.gapMsTotal)
+            .putString(K_PROTOCOL, s.protocolId)
+            .putLong(K_PROTOCOL_END_UTC, s.protocolEndUtcMs)
             .apply()
     }
 
@@ -58,6 +68,8 @@ internal class RunHeartbeat(context: Context) {
             pausedAtMonoNs = prefs.getLong(K_PAUSED_AT_MONO, 0L),
             pausedMsTotal = prefs.getLong(K_PAUSED_MS, 0L),
             gapMsTotal = prefs.getLong(K_GAP_MS, 0L),
+            protocolId = prefs.getString(K_PROTOCOL, null),
+            protocolEndUtcMs = prefs.getLong(K_PROTOCOL_END_UTC, 0L),
         )
     }
 
@@ -77,5 +89,7 @@ internal class RunHeartbeat(context: Context) {
         const val K_PAUSED_AT_MONO = "paused_at_mono_ns"
         const val K_PAUSED_MS = "paused_ms_total"
         const val K_GAP_MS = "gap_ms_total"
+        const val K_PROTOCOL = "protocol_id"
+        const val K_PROTOCOL_END_UTC = "protocol_end_utc_ms"
     }
 }

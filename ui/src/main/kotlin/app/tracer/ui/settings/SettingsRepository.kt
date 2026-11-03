@@ -22,8 +22,9 @@ import javax.inject.Singleton
 private val Context.tracerSettingsStore: DataStore<Preferences> by preferencesDataStore(name = "tracer_settings")
 
 /**
- * Persisted [RunSettings] (key "run_settings_json" = RunSettings.toStorageJson()) plus the debug
- * simulate-scenario choice (key "debug_sim_scenario"). Shared with the live/replay UI.
+ * Persisted [RunSettings] (key "run_settings_json" = RunSettings.toStorageJson()), the debug
+ * simulate-scenario choice (key "debug_sim_scenario") and the last pre-flight site (key
+ * "last_site"). Shared with the live/replay UI.
  */
 @Singleton
 class SettingsRepository @Inject constructor(
@@ -61,6 +62,17 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    /** Site typed in the last pre-flight ("Office"), or null. */
+    val lastSite: Flow<String?> = safeData.map { it[KEY_LAST_SITE]?.takeIf { s -> s.isNotBlank() } }.distinctUntilChanged()
+
+    suspend fun setLastSite(site: String?) {
+        store.edit { prefs ->
+            val v = site?.trim()
+            if (v.isNullOrEmpty()) prefs.remove(KEY_LAST_SITE) else prefs[KEY_LAST_SITE] = v
+            Unit
+        }
+    }
+
     private fun decode(json: String?): RunSettings =
         json?.let { runCatching { RunSettings.fromJson(it) }.onFailure { e -> Log.w(TAG, "corrupt settings json", e) }.getOrNull() }
             ?: RunSettings()
@@ -69,5 +81,6 @@ class SettingsRepository @Inject constructor(
         const val TAG = "SettingsRepository"
         val KEY_SETTINGS = stringPreferencesKey("run_settings_json")
         val KEY_SIM = stringPreferencesKey("debug_sim_scenario")
+        val KEY_LAST_SITE = stringPreferencesKey("last_site")
     }
 }
