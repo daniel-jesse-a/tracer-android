@@ -56,7 +56,8 @@ class PublicIpProbeCollector @Inject constructor(
         } catch (e: IllegalArgumentException) {
             return ProbeSample(ctx.runId, stamp, "public_ip", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular)
         }
-        val client = networks.client(baseClient, bound.network, settings.thresholds.probeTimeoutMs * 2)
+        val client = networks.client(baseClient, bound.network, 10_000L).newBuilder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build() // not a latency KPI: allow slow first connects
         val r = HttpProbe.execute(client, request, BodyMode.Text())
         val info = if (r.success) r.body?.let(::parseIpInfo) else null
         val ok = r.success && info?.ip != null

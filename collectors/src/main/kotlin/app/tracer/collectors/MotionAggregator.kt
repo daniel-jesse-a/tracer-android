@@ -28,6 +28,9 @@ class MotionAggregator {
     private var count = 0
     private var latestHpa: Double? = null
     private var firstHpa: Double? = null
+    /** Rolling window (~2.5 s at 10 Hz) — median rejects squeeze/door/handling spikes. */
+    private val recentHpa = ArrayDeque<Double>()
+    private val baselineHpa = ArrayList<Double>()
     private var pressureSinceDrain = false
 
     fun addAccel(x: Double, y: Double, z: Double) = addAccelDeviation(accelDeviation(x, y, z))
@@ -41,8 +44,13 @@ class MotionAggregator {
 
     fun addPressureHpa(hPa: Double) {
         if (hPa.isNaN() || hPa <= 0.0) return
-        if (firstHpa == null) firstHpa = hPa
-        latestHpa = hPa
+        recentHpa.addLast(hPa)
+        while (recentHpa.size > PRESSURE_WINDOW) recentHpa.removeFirst()
+        if (firstHpa == null) {
+            baselineHpa += hPa
+            if (baselineHpa.size >= BASELINE_SAMPLES) firstHpa = median(baselineHpa)
+        }
+        latestHpa = median(recentHpa)
         pressureSinceDrain = true
     }
 
@@ -63,6 +71,13 @@ class MotionAggregator {
     }
 
     companion object {
+        private const val PRESSURE_WINDOW = 25
+        private const val BASELINE_SAMPLES = 10
+        private fun median(xs: Collection<Double>): Double {
+            val s = xs.sorted(); val n = s.size
+            return if (n % 2 == 1) s[n / 2] else (s[n / 2 - 1] + s[n / 2]) / 2.0
+        }
+
         /** SensorManager.GRAVITY_EARTH */
         const val GRAVITY_EARTH = 9.80665
         /** SensorManager.PRESSURE_STANDARD_ATMOSPHERE (hPa) */

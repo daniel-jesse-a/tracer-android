@@ -15,6 +15,7 @@ object Cause {
     const val STICKY_CLIENT = "sticky_client"
     const val CHANNEL_CONGESTION = "channel_congestion"
     const val WIFI_UPLINK = "wifi_uplink"
+    const val WIFI_ROAM_TRANSITION = "wifi_roam_transition"
     const val CAPTIVE = "captive_portal"
     const val DNS = "dns_issue"
     const val GATEWAY = "carrier_gateway_change"
@@ -51,11 +52,17 @@ class CauseEngine {
 
         val isConnectivity = eventType in setOf(EventType.DROP, EventType.SIGNAL_DROP, EventType.LATENCY_SPIKE, EventType.THROUGHPUT_DROP,
             EventType.RAT_CHANGE, EventType.DNS_SPIKE, EventType.WIFI_ROAM, EventType.WIFI_CELL_SWITCH, EventType.CAPTIVE_PORTAL)
-        val cellular = !ctx.onWifi()
+        // Domain scoping: cellular-RF events only get cellular causes; Wi-Fi events only Wi-Fi causes;
+        // path events (drop/latency/dns/throughput) get the causes of the path they were measured on.
+        val rfEvent = eventType in setOf(EventType.SIGNAL_DROP, EventType.HANDOVER, EventType.RAT_CHANGE, EventType.NEIGHBOUR_OVERTAKE)
+        val wifiEvent = eventType == EventType.WIFI_ROAM || eventType == EventType.WIFI_CELL_SWITCH
+        val path = extra["path"]?.jsonPrimitive?.contentOrNull ?: if (rfEvent) "cellular" else ctx.defaultPath()
+        val cellular = !wifiEvent && (rfEvent || path == "cellular")
+        val onWifiPath = !rfEvent && (wifiEvent || path == "wifi")
         val serving = ctx.primaryServing()
 
         // ---- tunnel / underpass: GNSS collapse + radio degradation, simultaneously ----
-        if (isConnectivity) {
+        if (isConnectivity && cellular) {
             val before = ctx.epochsBetween(lb + 30_000, lb)
             val recent = ctx.epochsBetween(lb, 0)
             val usedBefore = Stats.median(before.map { it.used.toDouble() })
@@ -94,7 +101,7 @@ class CauseEngine {
         }
 
         // ---- late / failed handover: overtake preceded the event and no handover followed ----
-        if (eventType == EventType.DROP || eventType == EventType.SIGNAL_DROP || eventType == EventType.LATENCY_SPIKE) {
+        if (cellular && (eventType == EventType.DROP || eventType == EventType.SIGNAL_DROP || eventType == EventType.LATENCY_SPIKE)) {
             val ot = ctx.overtakes.since(ctx.nowMs, lb + 5_000)
             val hoSince = ctx.handoverTimes.since(ctx.nowMs, lb).size
             if (ot.isNotEmpty() && hoSince == 0) {
@@ -105,7 +112,7 @@ class CauseEngine {
         }
 
         // ---- handover churn at speed ----
-        if (eventType == EventType.HANDOVER || eventType == EventType.DROP || eventType == EventType.LATENCY_SPIKE) {
+        if (cellular && (eventType == EventType.HANDOVER || eventType == EventType.DROP || eventType == EventType.LATENCY_SPIKE)) {
             val n = ctx.handoverTimes.since(ctx.nowMs, (th.churnWindowS * 1000).toLong()).size
             val v = ctx.speedMps()
             if (n >= th.churnHandovers && (v ?: 0.0) >= th.churnMinSpeedMps) {
@@ -137,7 +144,7 @@ class CauseEngine {
         }
 
         // ---- Wi-Fi ----
-        if (ctx.onWifi() || eventType == EventType.WIFI_ROAM || eventType == EventType.WIFI_CELL_SWITCH) {
+        if (onWifiPath) {
             val hist = ctx.wifiHistory.since(ctx.nowMs, lb)
             val minRssi = hist.mapNotNull { it.rssiDbm }.minOrNull()
             val cur = ctx.wifi
@@ -154,13 +161,20 @@ class CauseEngine {
                     })
                 }
             }
+            // A BSSID change inside the lookback: re-association / 802.1X re-auth stalls traffic for 100s of ms.
+            if (eventType != EventType.WIFI_ROAM) {
+                val roams = ctx.roamTimes.since(ctx.nowMs, lb)
+                if (roams.isNotEmpty()) c += Candidate(Cause.WIFI_ROAM_TRANSITION, 0.65, buildJsonObject {
+                    put("roams_in_window", roams.size); put("security", cur?.security)
+                })
+            }
             cur?.frequencyMhz?.let { f ->
                 val sameChannel = ctx.lastScan.count { it.frequencyMhz == f }
                 if (sameChannel >= th.channelCongestionAps) {
                     c += Candidate(Cause.CHANNEL_CONGESTION, 0.5, buildJsonObject { put("aps_on_channel", sameChannel); put("frequency_mhz", f) })
                 }
             }
-            if (ctx.onWifi() && (eventType == EventType.LATENCY_SPIKE || eventType == EventType.DROP || eventType == EventType.THROUGHPUT_DROP)) {
+            if (path == "wifi" && (eventType == EventType.LATENCY_SPIKE || eventType == EventType.DROP || eventType == EventType.THROUGHPUT_DROP)) {
                 val good = hist.isNotEmpty() && hist.all { (it.rssiDbm ?: -100) > th.wifiGoodRssi }
                 if (good && ctx.path?.status == "satisfied") {
                     c += Candidate(Cause.WIFI_UPLINK, 0.6, buildJsonObject { put("min_rssi", minRssi); put("path_status", "satisfied") })
@@ -169,15 +183,17 @@ class CauseEngine {
         }
 
         // ---- captive portal ----
-        val captiveSeen = ctx.pathHistory.since(ctx.nowMs, lb + 30_000).any { it.unsatisfiedReason == "captive_portal" } ||
-            ctx.latencyProbes.since(ctx.nowMs, lb).any { it.error?.startsWith("http_3") == true }
-        if (captiveSeen && (eventType == EventType.DROP || eventType == EventType.CAPTIVE_PORTAL || eventType == EventType.LATENCY_SPIKE)) {
+        // Only the OS captive flag or a non-204 captive check counts — redirects from ordinary latency
+        // endpoints are not portals (that misread 100 % of "Office test 1" events as captive_portal).
+        val captiveSeen = eventType == EventType.CAPTIVE_PORTAL ||
+            ctx.pathHistory.since(ctx.nowMs, lb + 30_000).any { it.unsatisfiedReason == "captive_portal" }
+        if (!rfEvent && captiveSeen && (eventType == EventType.DROP || eventType == EventType.CAPTIVE_PORTAL || eventType == EventType.LATENCY_SPIKE)) {
             c += Candidate(Cause.CAPTIVE, 0.9, buildJsonObject { put("path_reason", "captive_portal") })
         }
 
         // ---- DNS ----
         if (eventType == EventType.DNS_SPIKE || eventType == EventType.LATENCY_SPIKE || eventType == EventType.DROP) {
-            val recent = ctx.latencyProbes.since(ctx.nowMs, lb)
+            val recent = ctx.latencyProbes.since(ctx.nowMs, lb).filter { ctx.pathOf(it) == path }
             val dnsErrors = recent.count { it.error == "dns" }
             val last = recent.lastOrNull()
             val lastDns = last?.dnsMs

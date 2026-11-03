@@ -32,6 +32,8 @@ data class LiveSnapshot(
     val channelLoad: List<ChannelLoad> = emptyList(),
     val satellites: List<SatView> = emptyList(),
     val latencyMs: Double? = null,
+    /** RTT on the parallel mobile-data path while Wi-Fi is the default (dual-path probing). */
+    val cellularLatencyMs: Double? = null,
     val medianLatencyMs: Double? = null,
     val jitterMs: Double? = null,
     val lossPct: Double? = null,
@@ -83,6 +85,9 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
         var sn = snapshot
         when (s) {
             is LocationSample -> {
+                if (s.provider != "gps" && sn.location?.provider == "gps" && s.stamp.tMonoNs - sn.location.stamp.tMonoNs < 5_000_000_000L) {
+                    snapshot = sn; return // raw GPS is fresh; fused is comparison data only
+                }
                 val prev = sn.location
                 val step = prev?.let { Geo.haversineM(it.lat, it.lon, s.lat, s.lon) } ?: 0.0
                 sn = sn.copy(location = s, distanceM = sn.distanceM + if (step < 500) step else 0.0)
@@ -133,13 +138,21 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
             }
             is ProbeSample -> when (s.probeType) {
                 "latency" -> {
-                    latencyWindow.add(s.totalMs.takeIf { s.success } to s.success)
-                    val all = latencyWindow.toList()
-                    val ok = all.filter { it.second }.mapNotNull { it.first }
-                    sn = sn.copy(
-                        latencyMs = s.totalMs.takeIf { s.success }, medianLatencyMs = Stats.median(ok), jitterMs = Stats.jitter(ok),
-                        lossPct = 100.0 * all.count { !it.second } / all.size,
-                    )
+                    // Tiles show the default path only (dual-path probing also measures cellular while on Wi-Fi),
+                    // and RTT (TCP connect) rather than the whole fresh-HTTPS handshake.
+                    val onDefault = s.isCellular == null || sn.transport == null || s.isCellular == (sn.transport == "cellular")
+                    val rtt = s.connectMs?.takeIf { it > 0 } ?: s.totalMs
+                    if (onDefault) {
+                        latencyWindow.add(rtt.takeIf { s.success } to s.success)
+                        val all = latencyWindow.toList()
+                        val ok = all.filter { it.second }.mapNotNull { it.first }
+                        sn = sn.copy(
+                            latencyMs = rtt.takeIf { s.success }, medianLatencyMs = Stats.median(ok), jitterMs = Stats.jitter(ok),
+                            lossPct = 100.0 * all.count { !it.second } / all.size,
+                        )
+                    } else if (s.success) {
+                        sn = sn.copy(cellularLatencyMs = rtt)
+                    }
                 }
                 "throughput" -> if (s.success) sn = sn.copy(lastMbps = s.mbps)
                 "public_ip" -> if (s.success) sn = sn.copy(publicIp = s.publicIp, asnOrg = s.asnOrg)

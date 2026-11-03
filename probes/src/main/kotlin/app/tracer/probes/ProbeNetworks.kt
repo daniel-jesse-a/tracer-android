@@ -3,6 +3,7 @@ package app.tracer.probes
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkRequest
 import android.net.NetworkCapabilities
 import app.tracer.core.runtime.RunSignals
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -29,6 +30,57 @@ class ProbeNetworks @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val cm: ConnectivityManager? = context.getSystemService(ConnectivityManager::class.java)
+
+    @Volatile private var cellularNetwork: Network? = null
+    private var cellularCallback: ConnectivityManager.NetworkCallback? = null
+    private var cellularLeases = 0
+
+    /**
+     * Keeps a mobile-data network up alongside Wi-Fi (ConnectivityManager.requestNetwork) so probes
+     * can measure the cellular path even when Wi-Fi is the default. Ref-counted; call [releaseCellular].
+     */
+    @Synchronized
+    fun acquireCellular() {
+        val manager = cm ?: return
+        cellularLeases++
+        if (cellularCallback != null) return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { cellularNetwork = network }
+            override fun onLost(network: Network) { if (cellularNetwork == network) cellularNetwork = null }
+            override fun onUnavailable() { cellularNetwork = null }
+        }
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        try {
+            manager.requestNetwork(request, cb)
+            cellularCallback = cb
+        } catch (e: RuntimeException) {
+            // SecurityException (CHANGE_NETWORK_STATE missing) or too many requests — no parallel cellular path.
+            cellularLeases--
+        }
+    }
+
+    @Synchronized
+    fun releaseCellular() {
+        if (cellularLeases > 0) cellularLeases--
+        if (cellularLeases > 0) return
+        val cb = cellularCallback ?: return
+        cellularCallback = null
+        cellularNetwork = null
+        try { cm?.unregisterNetworkCallback(cb) } catch (e: IllegalArgumentException) { /* already gone */ }
+    }
+
+    /** The parallel mobile-data network, when it is up and distinct from the default network. */
+    fun cellularIfNotDefault(): BoundNetwork? {
+        val manager = cm ?: return null
+        val network = cellularNetwork ?: return null
+        if (manager.activeNetwork == network) return null
+        val caps = manager.getNetworkCapabilities(network) ?: return null
+        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return null
+        return BoundNetwork(network, manager.getLinkProperties(network)?.interfaceName, isCellular = true)
+    }
 
     /** Current default network, or null when there is none. */
     fun current(): BoundNetwork? {

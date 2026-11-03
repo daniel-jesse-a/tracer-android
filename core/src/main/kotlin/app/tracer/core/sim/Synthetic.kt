@@ -53,7 +53,8 @@ class SecondBuilder internal constructor(
 
     fun latency(ms: Double?, dnsMs: Double = 8.0, endpoint: String = "https://1.1.1.1/cdn-cgi/trace", cellular: Boolean = true, error: String? = null) {
         out += if (ms == null) ProbeSample(runId, stamp(), "latency", endpoint, false, error ?: "timeout", iface = if (cellular) "rmnet0" else "wlan0", isCellular = cellular, totalMs = 3000.0)
-        else ProbeSample(runId, stamp(), "latency", endpoint, true, null, dnsMs, ms * 0.3, ms * 0.3, ms * 0.8, ms + dnsMs, 0, null, if (cellular) "rmnet0" else "wlan0", cellular)
+        // ms = round-trip time: TCP connect ≈ 1 RTT, TLS 1.3 ≈ 1 RTT, TTFB ≈ 1 RTT
+        else ProbeSample(runId, stamp(), "latency", endpoint, true, null, dnsMs, ms, ms, ms, 3 * ms + dnsMs, 0, null, if (cellular) "rmnet0" else "wlan0", cellular)
     }
 
     fun throughput(mbps: Double, cellular: Boolean = true) {

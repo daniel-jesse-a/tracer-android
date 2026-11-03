@@ -65,10 +65,27 @@ class CellularCollector @Inject constructor(
         fun emitCells(subId: Int, cells: List<CellInfo>) {
             val stamp = ctx.clock.now()
             val nowMono = ctx.clock.now().tMonoNs
-            for (info in cells) {
-                val raw = info.toRawCell() ?: continue
-                val sample = CellNormalizer.normalize(raw, ctx.runId, stamp, subId, nowMono)
-                if (!out.emitFromCallback(ctx, id, sample)) return
+            // Primary serving cell first: the event engine treats the first serving row of a poll as
+            // the PCell. Pixel modems also flag a second LTE cell as registered that carries the
+            // PCell's cell id (seen on B20 next to a B3 PCell) — that is not a serving cell, so it is
+            // demoted to a neighbour unless the modem marks it as a CA secondary.
+            val rank = { c: CellInfo ->
+                when {
+                    c.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING -> 0
+                    c.isRegistered -> 1
+                    else -> 2
+                }
+            }
+            val samples = cells.sortedBy(rank).mapNotNull { info ->
+                info.toRawCell()?.let { raw -> info to CellNormalizer.normalize(raw, ctx.runId, stamp, subId, nowMono) }
+            }
+            val primary = samples.firstOrNull { it.second.serving }?.second
+            for ((info, sample) in samples) {
+                val bogusServing = sample.serving && sample !== primary && primary != null &&
+                    sample.rat == primary.rat && sample.cellId != null && sample.cellId == primary.cellId &&
+                    info.cellConnectionStatus != CellInfo.CONNECTION_SECONDARY_SERVING
+                val row = if (bogusServing) sample.copy(serving = false) else sample
+                if (!out.emitFromCallback(ctx, id, row)) return
             }
         }
 

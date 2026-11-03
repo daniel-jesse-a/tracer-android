@@ -41,7 +41,9 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     fun onSample(s: Sample): List<EventSample> {
         val t = s.stamp.tMonoMs
         if (t > ctx.nowMs) ctx.nowMs = t
+        if (ctx.firstSampleMs == null) ctx.firstSampleMs = t
         val out = mutableListOf<EventSample>()
+        checkNoFix(s.stamp, out)
         if (s !is GnssSatelliteSample) flushGnss(s.stamp, out, force = false)
         if (s !is WifiScanSample) flushScan()
         when (s) {
@@ -102,8 +104,8 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         ctx.path?.let { put("path_status", it.status); put("primary_interface", it.primaryInterface) }
         ctx.gnssEpochs.last()?.let { put("gnss_used", it.used); put("gnss_mean_top_cn0", it.meanTopCn0) }
         ctx.lastLocation?.let { put("speed_mps", it.speedMps); put("h_acc_m", it.hAccM) }
-        put("median_latency_ms", ctx.medianLatency())
-        put("consecutive_failures", ctx.consecutiveFailures)
+        put("median_rtt_ms", ctx.medianLatency())
+        put("consecutive_failures", ctx.pathState(ctx.defaultPath()).consecutiveFailures)
     }
 
     private fun cellJson(c: CellSample) = buildJsonObject {
@@ -117,7 +119,29 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
 
     // ------------------------------------------------------------------ location / GNSS
 
+    /** No raw GNSS fix for gps_no_fix_s since start / last fix → gps_degraded(no_fix), once per outage. */
+    private fun checkNoFix(stamp: Stamp, out: MutableList<EventSample>) {
+        val since = ctx.lastGpsFixMs ?: ctx.firstSampleMs ?: return
+        if (!ctx.noFixReported && ctx.nowMs - since >= (th.gpsNoFixS * 1000).toLong()) {
+            ctx.noFixReported = true
+            ctx.gpsDegraded = true; ctx.gpsLastBadMs = ctx.nowMs
+            emit(out, stamp, EventType.GPS_DEGRADED, Severity.WARNING, null, buildJsonObject {
+                put("reason", "no_fix"); put("seconds_without_fix", (ctx.nowMs - since) / 1000)
+                put("fallback_provider", ctx.lastLocation?.provider)
+            }, diagnose = false, spacingKey = EventType.GPS_DEGRADED)
+        }
+    }
+
     private fun onLocation(l: LocationSample, out: MutableList<EventSample>) {
+        if (l.provider != "gps") {
+            // Fused/network fixes only position events when raw GPS is absent (indoors); they never
+            // drive GNSS-quality rules.
+            val lastGps = ctx.lastGpsFixMs
+            if (lastGps == null || ctx.nowMs - lastGps > 5_000) { ctx.lastLocation = l; ctx.locations.add(ctx.nowMs, l) }
+            return
+        }
+        ctx.lastGpsFixMs = ctx.nowMs
+        ctx.noFixReported = false
         val step = ctx.recordStep(l)
         val medianStep = Stats.median(ctx.stepDistances.toList())
         val jump = step != null && medianStep != null && ctx.stepDistances.size >= 5 &&
@@ -175,6 +199,10 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     private fun onServing(c: CellSample, out: MutableList<EventSample>) {
         if ((c.cellinfoAgeMs ?: 0) > th.cellStaleMs) return // cached CellInfo, not evidence of anything
         val key = cellKey(c)
+        // Only the first serving row of a poll (same stamp) is the PCell; the collector emits it first.
+        // Further "serving" rows in that poll (CA SCells, modem quirks) must not look like handovers.
+        if (ctx.servingPollStamp[key] == c.stamp.tMonoNs) return
+        ctx.servingPollStamp[key] = c.stamp.tMonoNs
         val prev = ctx.serving[key]
         val hist = ctx.servingHistory.getOrPut(key) { TimeWindow(120_000) }
 
@@ -238,6 +266,7 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         val prev = ctx.wifi
         if (prev?.bssid != null && w.bssid != null && prev.bssid != w.bssid && prev.ssid == w.ssid) {
             emit(out, w.stamp, EventType.WIFI_ROAM, Severity.INFO, wifiJson(prev), wifiJson(w))
+            ctx.roamTimes.add(ctx.nowMs, w.bssid ?: "")
         }
         ctx.wifi = w
         ctx.wifiHistory.add(ctx.nowMs, w)
@@ -265,98 +294,132 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         val prev = ctx.path
         ctx.path = p
         ctx.pathHistory.add(ctx.nowMs, p)
+        val primary = p.primaryInterface?.takeIf { it != "none" }
+        val lastPrimary = ctx.lastPrimary
+        if (primary != null) ctx.lastPrimary = primary
         if (prev == null) return
-        val prevPrimary = prev.primaryInterface
-        if (prevPrimary != p.primaryInterface && setOf(prevPrimary, p.primaryInterface) == setOf("wifi", "cellular")) {
-            emit(out, p.stamp, EventType.WIFI_CELL_SWITCH, Severity.INFO, pathJson(prev), pathJson(p))
+        // wifi ↔ cellular, also when the switch passes through an "unsatisfied / none" instant
+        if (primary != null && lastPrimary != null && primary != lastPrimary && setOf(lastPrimary, primary) == setOf("wifi", "cellular")) {
+            emit(out, p.stamp, EventType.WIFI_CELL_SWITCH, Severity.INFO,
+                buildJsonObject { put("primary_interface", lastPrimary) }, pathJson(p), extra = pathExtra(lastPrimary))
         }
         if (p.unsatisfiedReason == "captive_portal" && prev.unsatisfiedReason != "captive_portal") {
             emit(out, p.stamp, EventType.CAPTIVE_PORTAL, Severity.WARNING, pathJson(prev), pathJson(p))
             return
         }
-        if (prev.status == "satisfied" && p.status != "satisfied" && !ctx.dropped) {
-            startDrop(out, p.stamp, "path_${p.unsatisfiedReason ?: p.status}", pathJson(prev), pathJson(p))
+        val path = lastPrimary ?: ctx.defaultPath()
+        val ps = ctx.pathState(path)
+        if (prev.status == "satisfied" && p.status != "satisfied" && !ps.dropped) {
+            startDrop(out, p.stamp, path, "path_${p.unsatisfiedReason ?: p.status}", pathJson(prev), pathJson(p))
+        } else if (p.status == "satisfied" && primary != null && primary != path) {
+            // default network moved to another transport: the old path's outage is not "ongoing" for the user
+            val old = ctx.pathState(path)
+            if (old.dropped) endDrop(out, p.stamp, path, old, primary)
         }
     }
 
-    private fun startDrop(out: MutableList<EventSample>, stamp: Stamp, reason: String, before: JsonObject?, after: JsonObject?) {
-        ctx.dropped = true; ctx.dropStartMs = ctx.nowMs; ctx.dropReason = reason
+    private fun pathExtra(path: String) = buildJsonObject { put("path", path) }
+
+    private fun startDrop(out: MutableList<EventSample>, stamp: Stamp, path: String, reason: String, before: JsonObject?, after: JsonObject?) {
+        val ps = ctx.pathState(path)
+        ps.dropped = true; ps.dropStartMs = ctx.nowMs; ps.dropReason = reason
         emit(out, stamp, EventType.DROP, Severity.CRITICAL, before,
-            JsonObject((after ?: JsonObject(emptyMap())) + mapOf("trigger" to JsonPrimitive(reason))))
+            JsonObject((after ?: JsonObject(emptyMap())) + mapOf("trigger" to JsonPrimitive(reason), "path" to JsonPrimitive(path))),
+            extra = pathExtra(path))
+    }
+
+    private fun endDrop(out: MutableList<EventSample>, stamp: Stamp, path: String, ps: Context.PathState, via: String?) {
+        val outage = ctx.nowMs - ps.dropStartMs
+        ps.dropped = false
+        emit(out, stamp, EventType.RECONNECT, Severity.INFO,
+            buildJsonObject { put("trigger", ps.dropReason); put("path", path) },
+            buildJsonObject { put("outage_ms", outage); put("interface", via) }, diagnose = false)
+        ps.dropReason = null
+        ps.consecutiveFailures = 0; ps.failingEndpoints.clear()
     }
 
     private fun onProbe(p: ProbeSample, out: MutableList<EventSample>) {
+        val path = ctx.pathOf(p)
+        val ps = ctx.pathState(path)
         when (p.probeType) {
-            "latency" -> onLatency(p, out)
+            "latency" -> onLatency(p, path, ps, out)
             "throughput" -> {
                 val mbps = p.mbps
                 if (p.success && mbps != null) {
-                    val median = ctx.throughputMedian()
-                    if (median != null && ctx.throughput.size >= th.throughputMinSamples && mbps < median * (1 - th.throughputDropFraction)) {
+                    val median = ps.throughputMedian()
+                    if (median != null && ps.throughput.size >= th.throughputMinSamples && mbps < median * (1 - th.throughputDropFraction)) {
                         emit(out, p.stamp, EventType.THROUGHPUT_DROP, Severity.WARNING,
-                            buildJsonObject { put("median_mbps", median) }, buildJsonObject { put("mbps", mbps); put("interface", p.iface) },
-                            spacingKey = EventType.THROUGHPUT_DROP)
+                            buildJsonObject { put("median_mbps", median); put("path", path) }, buildJsonObject { put("mbps", mbps); put("interface", p.iface) },
+                            spacingKey = "${EventType.THROUGHPUT_DROP}:$path", extra = pathExtra(path))
                     }
-                    ctx.throughput.add(mbps)
+                    ps.throughput.add(mbps)
                 }
             }
             "public_ip" -> if (p.success && p.publicIp != null) {
                 val prev = ctx.lastPublicIp
                 ctx.lastPublicIp = p
-                if (prev?.publicIp != null && (prev.publicIp != p.publicIp || prev.asn != p.asn)) {
+                if (prev?.publicIp != null && prev.isCellular == p.isCellular && (prev.publicIp != p.publicIp || prev.asn != p.asn)) {
                     val asnChanged = prev.asn != p.asn
                     emit(out, p.stamp, EventType.IP_ASN_CHANGE, if (asnChanged) Severity.WARNING else Severity.INFO,
                         buildJsonObject { put("public_ip", prev.publicIp); put("asn", prev.asn); put("asn_org", prev.asnOrg) },
                         buildJsonObject { put("public_ip", p.publicIp); put("asn", p.asn); put("asn_org", p.asnOrg) },
-                        extra = buildJsonObject { put("asn_changed", asnChanged); put("is_cellular", p.isCellular) })
+                        extra = buildJsonObject { put("asn_changed", asnChanged); put("is_cellular", p.isCellular); put("path", path) })
                 }
             }
             "captive" -> if (!p.success && p.error?.startsWith("http_") == true && p.error != "http_204") {
-                emit(out, p.stamp, EventType.CAPTIVE_PORTAL, Severity.WARNING, null, buildJsonObject { put("error", p.error) }, spacingKey = EventType.CAPTIVE_PORTAL)
+                emit(out, p.stamp, EventType.CAPTIVE_PORTAL, Severity.WARNING, null, buildJsonObject { put("error", p.error); put("path", path) },
+                    spacingKey = EventType.CAPTIVE_PORTAL, extra = pathExtra(path))
             }
         }
     }
 
-    private fun onLatency(p: ProbeSample, out: MutableList<EventSample>) {
+    /** RTT proxy: TCP connect time (one round trip). Falls back to the whole call when phases are missing. */
+    private fun rttOf(p: ProbeSample): Double? = p.connectMs?.takeIf { it > 0 } ?: p.totalMs
+
+    private fun onLatency(p: ProbeSample, path: String, ps: Context.PathState, out: MutableList<EventSample>) {
         ctx.latencyProbes.add(ctx.nowMs, p)
+        ctx.endpointsSeen += p.endpoint
         if (!p.success) {
-            ctx.consecutiveFailures++
-            if (ctx.consecutiveFailures >= th.dropConsecutiveFailures && !ctx.dropped) {
-                startDrop(out, p.stamp, "probe_failures", buildJsonObject { put("median_latency_ms", ctx.medianLatency()) },
-                    buildJsonObject { put("consecutive_failures", ctx.consecutiveFailures); put("error", p.error); put("endpoint", p.endpoint) })
+            ps.consecutiveFailures++
+            ps.failingEndpoints += p.endpoint
+            // A drop needs consecutive failures across ≥ 2 endpoints — one broken endpoint is not an outage.
+            val endpointsNeeded = minOf(2, ctx.distinctEndpoints)
+            if (ps.consecutiveFailures >= th.dropConsecutiveFailures && ps.failingEndpoints.size >= endpointsNeeded && !ps.dropped) {
+                startDrop(out, p.stamp, path, "probe_failures", buildJsonObject { put("median_rtt_ms", ps.medianLatency()) },
+                    buildJsonObject {
+                        put("consecutive_failures", ps.consecutiveFailures); put("error", p.error); put("endpoint", p.endpoint)
+                        put("endpoints_failing", ps.failingEndpoints.size)
+                    })
             }
             return
         }
-        ctx.consecutiveFailures = 0
-        if (ctx.dropped && ctx.path?.status != "unsatisfied" && ctx.path?.status != "requires_connection") {
-            val outage = ctx.nowMs - ctx.dropStartMs
-            ctx.dropped = false
-            emit(out, p.stamp, EventType.RECONNECT, Severity.INFO,
-                buildJsonObject { put("trigger", ctx.dropReason) },
-                buildJsonObject { put("outage_ms", outage); put("interface", p.iface); put("total_ms", p.totalMs) }, diagnose = false)
-            ctx.dropReason = null
-        }
-        val total = p.totalMs ?: return
-        val median = ctx.medianLatency()
-        if (median != null && ctx.latencyOk.size >= 5 && total > th.latencyFactor * median && total > th.latencyMinMs) {
+        ps.consecutiveFailures = 0
+        ps.failingEndpoints.clear()
+        val pathUp = path != ctx.defaultPath() || (ctx.path?.status != "unsatisfied" && ctx.path?.status != "requires_connection")
+        if (ps.dropped && pathUp) endDrop(out, p.stamp, path, ps, p.iface)
+        val rtt = rttOf(p) ?: return
+        val median = ps.medianLatency()
+        if (median != null && ps.latencyOk.size >= 5 && rtt > th.latencyFactor * median && rtt > th.latencyMinMs) {
             emit(out, p.stamp, EventType.LATENCY_SPIKE, Severity.WARNING,
-                buildJsonObject { put("median_ms", median) },
-                buildJsonObject { put("total_ms", total); put("dns_ms", p.dnsMs); put("connect_ms", p.connectMs); put("tls_ms", p.tlsMs); put("ttfb_ms", p.ttfbMs); put("endpoint", p.endpoint) },
-                spacingKey = EventType.LATENCY_SPIKE)
+                buildJsonObject { put("median_rtt_ms", median); put("path", path) },
+                buildJsonObject {
+                    put("rtt_ms", rtt); put("total_ms", p.totalMs); put("dns_ms", p.dnsMs); put("connect_ms", p.connectMs)
+                    put("tls_ms", p.tlsMs); put("ttfb_ms", p.ttfbMs); put("endpoint", p.endpoint)
+                },
+                spacingKey = "${EventType.LATENCY_SPIKE}:$path", extra = pathExtra(path))
         }
         p.dnsMs?.let { dns ->
-            val md = ctx.medianDns()
-            if (md != null && ctx.dnsOk.size >= 5 && dns > th.dnsFactor * md && dns > th.dnsMinMs) {
+            val md = ps.medianDns()
+            if (md != null && ps.dnsOk.size >= 5 && dns > th.dnsFactor * md && dns > th.dnsMinMs) {
                 emit(out, p.stamp, EventType.DNS_SPIKE, Severity.WARNING,
-                    buildJsonObject { put("median_dns_ms", md) }, buildJsonObject { put("dns_ms", dns); put("endpoint", p.endpoint) },
-                    spacingKey = EventType.DNS_SPIKE)
+                    buildJsonObject { put("median_dns_ms", md); put("path", path) }, buildJsonObject { put("dns_ms", dns); put("endpoint", p.endpoint) },
+                    spacingKey = "${EventType.DNS_SPIKE}:$path", extra = pathExtra(path))
             }
-            ctx.dnsOk.add(dns)
+            ps.dnsOk.add(dns)
         }
-        // window bounded by thresholds.latencyWindow
-        ctx.latencyOk.add(total)
-        while (ctx.latencyOk.size > th.latencyWindow) { /* Ring caps at 60; enforce configured window */
-            val keep = ctx.latencyOk.toList().takeLast(th.latencyWindow); ctx.latencyOk.clear(); keep.forEach { ctx.latencyOk.add(it) }
+        ps.latencyOk.add(rtt)
+        if (ps.latencyOk.size > th.latencyWindow) {
+            val keep = ps.latencyOk.toList().takeLast(th.latencyWindow); ps.latencyOk.clear(); keep.forEach { ps.latencyOk.add(it) }
         }
     }
 }

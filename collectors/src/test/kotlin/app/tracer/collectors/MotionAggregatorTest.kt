@@ -28,14 +28,22 @@ class MotionAggregatorTest {
 
     @Test fun pressureAndRelativeAltitude() {
         val a = MotionAggregator()
-        a.addPressureHpa(1013.25)
+        repeat(10) { a.addPressureHpa(1013.25) } // baseline = median of the first 10 readings
         val first = a.drain()!!
         assertEquals(101.325, first.pressureKpa!!, 1e-9)
         assertEquals(0.0, first.relAltM!!, 1e-9)
-        a.addPressureHpa(1001.29) // ≈ 100 m higher
+        repeat(25) { a.addPressureHpa(1001.29) } // ≈ 100 m higher, sustained
         val second = a.drain()!!
         assertEquals(100.0, second.relAltM!!, 1.5)
         assertNull(second.accelMean)
+    }
+
+    @Test fun singlePressureSpikeIsRejected() {
+        val a = MotionAggregator()
+        repeat(20) { a.addPressureHpa(1013.25) }
+        a.addPressureHpa(1014.6) // squeeze/door spike ≈ −11 m (seen in "Office test 1")
+        a.addPressureHpa(1013.25)
+        assertEquals(0.0, a.drain()!!.relAltM!!, 0.01)
     }
 
     @Test fun altitudeMatchesSensorManagerFormula() {

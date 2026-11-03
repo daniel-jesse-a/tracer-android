@@ -51,7 +51,8 @@ class CaptiveProbeCollector @Inject constructor(
         } catch (e: IllegalArgumentException) {
             return ProbeSample(ctx.runId, stamp, "captive", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular)
         }
-        val client = networks.client(baseClient, bound.network, settings.thresholds.probeTimeoutMs)
+        val client = networks.client(baseClient, bound.network, 10_000L).newBuilder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build() // not a latency KPI: allow slow first connects
         val r = HttpProbe.execute(client, request, isSuccess = { it == 204 })
         return ProbeSample(
             runId = ctx.runId,

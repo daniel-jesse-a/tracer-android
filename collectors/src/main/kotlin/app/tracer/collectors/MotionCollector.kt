@@ -68,6 +68,8 @@ class MotionCollector @Inject constructor(
         if (sensors != null && pressure != null) sensors.registerListener(sensorListener, pressure, 1_000_000, worker.handler)
         if (accel == null && pressure == null) ctx.status.degraded(id, "No accelerometer or barometer available.")
 
+        // Last activity transition, carried on every per-second row (transitions alone leave 99 % blank).
+        var currentActivity: String? = null
         val tick = object : Runnable {
             override fun run() {
                 aggregator.drain()?.let { a ->
@@ -76,6 +78,7 @@ class MotionCollector @Inject constructor(
                         MotionSample(
                             runId = ctx.runId,
                             stamp = ctx.clock.now(),
+                            activity = currentActivity,
                             pressureKpa = a.pressureKpa,
                             relAltM = a.relAltM,
                             accelMean = a.accelMean,
@@ -102,6 +105,7 @@ class MotionCollector @Inject constructor(
                     val result = ActivityTransitionResult.extractResult(intent) ?: return
                     for (e in result.transitionEvents) {
                         if (e.transitionType != ActivityTransition.ACTIVITY_TRANSITION_ENTER) continue
+                        currentActivity = activityName(e.activityType)
                         channel.emitFromCallback(
                             ctx, id,
                             MotionSample(

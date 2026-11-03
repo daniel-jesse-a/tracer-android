@@ -114,7 +114,8 @@ class EventRulesTest {
     @Test fun dnsSpike() {
         val ev = run("dns_issue")
         assertEquals(ev.dump(), Cause.DNS, ev.ofType(EventType.DNS_SPIKE).first().likelyCause)
-        assertEquals(Cause.DNS, ev.ofType(EventType.LATENCY_SPIKE).first().likelyCause)
+        // latency spikes are judged on RTT (TCP connect), which a slow resolver does not change
+        assertTrue(ev.dump(), ev.ofType(EventType.LATENCY_SPIKE).isEmpty())
     }
 
     @Test fun carrierGatewayChange() {

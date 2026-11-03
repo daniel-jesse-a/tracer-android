@@ -32,7 +32,9 @@ class LocationCollector @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : Collector {
     override val id = "location"
-    override val watchdogMs: Long = 10_000L
+    // No watchdog: indoors a GPS cold start can take minutes; restarting the request resets the
+    // GNSS engine and guarantees no fix (seen in "Office test 1"). Silence here is not a hang.
+    override val watchdogMs: Long? = null
 
     @SuppressLint("MissingPermission")
     override fun samples(ctx: CollectorContext): Flow<Sample> = callbackFlow<Sample> {

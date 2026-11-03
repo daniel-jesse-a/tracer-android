@@ -28,6 +28,7 @@ class Context(val th: Thresholds) {
 
     // cellular: key = "sub:rat"
     val serving = mutableMapOf<String, CellSample>()
+    internal val servingPollStamp = mutableMapOf<String, Long>()
     val servingHistory = mutableMapOf<String, TimeWindow<CellSample>>()
     val handoverTimes = TimeWindow<Long>(300_000)
     val cellChangeTimes = TimeWindow<String>(300_000)
@@ -39,6 +40,7 @@ class Context(val th: Thresholds) {
     // wifi
     var wifi: WifiConnectionSample? = null; internal set
     val wifiHistory = TimeWindow<WifiConnectionSample>(60_000)
+    val roamTimes = TimeWindow<String>(120_000)
     var lastScan: List<WifiScanSample> = emptyList(); internal set
     internal var pendingScanId: Long? = null
     internal val pendingScan = mutableListOf<WifiScanSample>()
@@ -47,22 +49,39 @@ class Context(val th: Thresholds) {
     var path: NetworkPathSample? = null; internal set
     val pathHistory = TimeWindow<NetworkPathSample>(120_000)
 
-    // probes
-    internal val latencyOk = Ring<Double>(60)
-    internal val dnsOk = Ring<Double>(60)
+    // probes — state is kept per path ("wifi" / "cellular"): with dual-path probing both run at once
+    class PathState {
+        internal val latencyOk = Ring<Double>(60)
+        internal val dnsOk = Ring<Double>(60)
+        internal val throughput = mutableListOf<Double>()
+        var consecutiveFailures = 0; internal set
+        internal val failingEndpoints = mutableSetOf<String>()
+        var dropped = false; internal set
+        var dropStartMs: Long = 0; internal set
+        var dropReason: String? = null; internal set
+        fun medianLatency(): Double? = Stats.median(latencyOk.toList())
+        fun medianDns(): Double? = Stats.median(dnsOk.toList())
+        fun throughputMedian(): Double? = Stats.median(throughput)
+    }
+    val paths = mutableMapOf<String, PathState>()
+    fun pathState(path: String) = paths.getOrPut(path) { PathState() }
     val latencyProbes = TimeWindow<ProbeSample>(120_000)
-    internal val throughput = mutableListOf<Double>()
-    var consecutiveFailures = 0; internal set
+    internal val endpointsSeen = mutableSetOf<String>()
+    val distinctEndpoints: Int get() = endpointsSeen.size.coerceAtLeast(1)
     var lastPublicIp: ProbeSample? = null; internal set
-
-    // drop state
-    var dropped = false; internal set
-    var dropStartMs: Long = 0; internal set
-    var dropReason: String? = null; internal set
+    /** Path of a probe row: its own is_cellular flag, else the current default transport. */
+    fun pathOf(p: ProbeSample): String = when (p.isCellular) { true -> "cellular"; false -> "wifi"; null -> if (onWifi()) "wifi" else "cellular" }
+    /** Path carrying the default network now. */
+    fun defaultPath(): String = if (onWifi()) "wifi" else "cellular"
 
     // gps state
     var gpsDegraded = false; internal set
     internal var gpsLastBadMs = 0L
+    internal var firstSampleMs: Long? = null
+    internal var lastGpsFixMs: Long? = null
+    internal var noFixReported = false
+    // last non-"none" primary interface (wifi ↔ cell switches often pass through a no-network instant)
+    internal var lastPrimary: String? = null
 
     internal val lastEmit = mutableMapOf<String, Long>()
 
@@ -92,9 +111,7 @@ class Context(val th: Thresholds) {
 
     fun speedMps(): Double? = lastLocation?.speedMps
 
-    fun medianLatency(): Double? = Stats.median(latencyOk.toList())
-    fun medianDns(): Double? = Stats.median(dnsOk.toList())
-    fun throughputMedian(): Double? = Stats.median(throughput)
+    fun medianLatency(): Double? = pathState(defaultPath()).medianLatency()
 
     fun lastLatLon(): Pair<Double, Double>? = lastLocation?.let { it.lat to it.lon }
 

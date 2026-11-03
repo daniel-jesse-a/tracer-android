@@ -12,11 +12,13 @@ data class Thresholds(
     val gpsJumpMinM: Double = 30.0,
     val gpsMinUsedSats: Int = 5,
     val gpsRecoverS: Double = 10.0,
+    /** No GNSS fix for this long while recording → gps_degraded(no_fix). */
+    val gpsNoFixS: Double = 45.0,
     val latencyFactor: Double = 3.0,
     val latencyMinMs: Double = 150.0,
     val latencyWindow: Int = 30,
     val dnsFactor: Double = 3.0,
-    val dnsMinMs: Double = 100.0,
+    val dnsMinMs: Double = 400.0,
     val throughputDropFraction: Double = 0.60,
     val throughputMinSamples: Int = 3,
     val signalDropDb: Int = 10,
@@ -46,7 +48,7 @@ data class Thresholds(
 ) {
     fun toJson(): JsonObject = buildJsonObject {
         put("gps_h_acc_m", gpsHAccM); put("gps_jump_factor", gpsJumpFactor); put("gps_jump_min_m", gpsJumpMinM)
-        put("gps_min_used_sats", gpsMinUsedSats); put("gps_recover_s", gpsRecoverS)
+        put("gps_min_used_sats", gpsMinUsedSats); put("gps_recover_s", gpsRecoverS); put("gps_no_fix_s", gpsNoFixS)
         put("latency_factor", latencyFactor); put("latency_min_ms", latencyMinMs); put("latency_window", latencyWindow)
         put("dns_factor", dnsFactor); put("dns_min_ms", dnsMinMs)
         put("throughput_drop_fraction", throughputDropFraction); put("throughput_min_samples", throughputMinSamples)
@@ -73,10 +75,10 @@ data class Thresholds(
             return Thresholds(
                 gpsHAccM = dbl("gps_h_acc_m", d.gpsHAccM), gpsJumpFactor = dbl("gps_jump_factor", d.gpsJumpFactor),
                 gpsJumpMinM = dbl("gps_jump_min_m", d.gpsJumpMinM), gpsMinUsedSats = int("gps_min_used_sats", d.gpsMinUsedSats),
-                gpsRecoverS = dbl("gps_recover_s", d.gpsRecoverS),
+                gpsRecoverS = dbl("gps_recover_s", d.gpsRecoverS), gpsNoFixS = dbl("gps_no_fix_s", d.gpsNoFixS),
                 latencyFactor = dbl("latency_factor", d.latencyFactor), latencyMinMs = dbl("latency_min_ms", d.latencyMinMs),
                 latencyWindow = int("latency_window", d.latencyWindow), dnsFactor = dbl("dns_factor", d.dnsFactor),
-                dnsMinMs = dbl("dns_min_ms", d.dnsMinMs), throughputDropFraction = dbl("throughput_drop_fraction", d.throughputDropFraction),
+                dnsMinMs = dbl("dns_min_ms", d.dnsMinMs).let { if (it == 100.0) d.dnsMinMs else it }, throughputDropFraction = dbl("throughput_drop_fraction", d.throughputDropFraction),
                 throughputMinSamples = int("throughput_min_samples", d.throughputMinSamples), signalDropDb = int("signal_drop_db", d.signalDropDb),
                 signalDropWindowS = dbl("signal_drop_window_s", d.signalDropWindowS), overtakeDb = int("overtake_db", d.overtakeDb),
                 overtakeHoldS = dbl("overtake_hold_s", d.overtakeHoldS), dropConsecutiveFailures = int("drop_consecutive_failures", d.dropConsecutiveFailures),
@@ -99,15 +101,20 @@ data class ProbeEndpoint(val url: String, val label: String, val regional: Boole
 /** User-tunable run settings. Persisted to DataStore as JSON and snapshotted into runs.settings_json. */
 data class RunSettings(
     val locationIntervalMs: Long = 1_000,
-    val useFusedComparison: Boolean = false,
+    /** Fused (Wi-Fi/cell-assisted) positions alongside raw GPS — the only position source indoors. */
+    val useFusedComparison: Boolean = true,
     val gnssRawMeasurements: Boolean = false,
     val cellPollIntervalMs: Long = 1_000,
     val wifiScanIntervalMs: Long = 30_000,
     val wifiRttEnabled: Boolean = false,
     val latencyIntervalMs: Long = 2_000,
     val adaptiveLatency: Boolean = true,
-    val throughputIntervalMs: Long = 60_000,
-    val throughputBytes: Long = 1_000_000,
+    val throughputIntervalMs: Long = 120_000,
+    /** Upper bound per test; the download also stops after [throughputMaxMs]. 1 MB never leaves TCP slow start. */
+    val throughputBytes: Long = 25_000_000,
+    val throughputMaxMs: Long = 5_000,
+    /** Also probe the mobile-data network while Wi-Fi is the default (uses a little mobile data). */
+    val dualPathProbing: Boolean = true,
     val publicIpIntervalMs: Long = 300_000,
     val deviceIntervalMs: Long = 30_000,
     val motionHz: Int = 10,
@@ -134,11 +141,13 @@ data class RunSettings(
     )
 
     fun toJson(): JsonObject = buildJsonObject {
+        put("settings_version", SETTINGS_VERSION)
         put("location_interval_ms", locationIntervalMs); put("use_fused_comparison", useFusedComparison)
         put("gnss_raw_measurements", gnssRawMeasurements); put("cell_poll_interval_ms", cellPollIntervalMs)
         put("wifi_scan_interval_ms", wifiScanIntervalMs); put("wifi_rtt_enabled", wifiRttEnabled)
         put("latency_interval_ms", latencyIntervalMs); put("adaptive_latency", adaptiveLatency)
         put("throughput_interval_ms", throughputIntervalMs); put("throughput_bytes", throughputBytes)
+        put("throughput_max_ms", throughputMaxMs); put("dual_path_probing", dualPathProbing)
         put("public_ip_interval_ms", publicIpIntervalMs); put("device_interval_ms", deviceIntervalMs)
         put("motion_hz", motionHz); put("battery_saver", batterySaver)
         putJsonArray("endpoints") {
@@ -157,16 +166,27 @@ data class RunSettings(
     }).toString()
 
     companion object {
+        /** Non-redirecting, tiny-response anycast endpoints (204/200). Redirects inflate TTFB and used to read as failures. */
+        const val SETTINGS_VERSION = 2
+
         val DEFAULT_ENDPOINTS = listOf(
-            ProbeEndpoint("https://1.1.1.1/cdn-cgi/trace", "Cloudflare"),
-            ProbeEndpoint("https://dns.google/", "Google"),
-            ProbeEndpoint("https://www.apple.com/library/test/success.html", "Apple"),
+            ProbeEndpoint("https://cp.cloudflare.com/generate_204", "Cloudflare"),
+            ProbeEndpoint("https://www.google.com/generate_204", "Google"),
+            ProbeEndpoint("https://captive.apple.com/hotspot-detect.html", "Apple"),
             ProbeEndpoint("https://www.etisalat.ae/", "Regional (e&)", regional = true),
+        )
+
+        /** v1.0.8 defaults that redirect (HTTP 302) → replacements; applied when loading stored settings. */
+        private val LEGACY_ENDPOINTS = mapOf(
+            "https://1.1.1.1/cdn-cgi/trace" to "https://cp.cloudflare.com/generate_204",
+            "https://dns.google/" to "https://www.google.com/generate_204",
+            "https://www.apple.com/library/test/success.html" to "https://captive.apple.com/hotspot-detect.html",
         )
 
         fun fromJson(text: String): RunSettings {
             val o = Json.parseToJsonElement(text).jsonObject
             val d = RunSettings()
+            val legacy = (o["settings_version"]?.jsonPrimitive?.intOrNull ?: 1) < SETTINGS_VERSION
             fun lng(k: String, def: Long) = o[k]?.jsonPrimitive?.doubleOrNull?.toLong() ?: def
             fun int(k: String, def: Int) = o[k]?.jsonPrimitive?.doubleOrNull?.toInt() ?: def
             fun bool(k: String, def: Boolean) = o[k]?.jsonPrimitive?.booleanOrNull ?: def
@@ -174,19 +194,22 @@ data class RunSettings(
             val eps = o["endpoints"]?.jsonArray?.mapNotNull { e ->
                 val eo = e.jsonObject
                 val url = eo["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                ProbeEndpoint(url, eo["label"]?.jsonPrimitive?.contentOrNull ?: url, eo["regional"]?.jsonPrimitive?.booleanOrNull ?: false)
+                ProbeEndpoint(LEGACY_ENDPOINTS[url] ?: url, eo["label"]?.jsonPrimitive?.contentOrNull ?: url, eo["regional"]?.jsonPrimitive?.booleanOrNull ?: false)
             }
             return RunSettings(
                 locationIntervalMs = lng("location_interval_ms", d.locationIntervalMs),
-                useFusedComparison = bool("use_fused_comparison", d.useFusedComparison),
+                // pre-v2 stores had fused off by default; v2 turns it on as the indoor position source
+                useFusedComparison = if (legacy) true else bool("use_fused_comparison", d.useFusedComparison),
                 gnssRawMeasurements = bool("gnss_raw_measurements", d.gnssRawMeasurements),
                 cellPollIntervalMs = lng("cell_poll_interval_ms", d.cellPollIntervalMs),
                 wifiScanIntervalMs = lng("wifi_scan_interval_ms", d.wifiScanIntervalMs),
                 wifiRttEnabled = bool("wifi_rtt_enabled", d.wifiRttEnabled),
                 latencyIntervalMs = lng("latency_interval_ms", d.latencyIntervalMs),
                 adaptiveLatency = bool("adaptive_latency", d.adaptiveLatency),
-                throughputIntervalMs = lng("throughput_interval_ms", d.throughputIntervalMs),
-                throughputBytes = lng("throughput_bytes", d.throughputBytes),
+                throughputIntervalMs = lng("throughput_interval_ms", d.throughputIntervalMs).let { if (it == 60_000L) d.throughputIntervalMs else it },
+                throughputBytes = lng("throughput_bytes", d.throughputBytes).let { if (it == 1_000_000L) d.throughputBytes else it },
+                throughputMaxMs = lng("throughput_max_ms", d.throughputMaxMs),
+                dualPathProbing = bool("dual_path_probing", d.dualPathProbing),
                 publicIpIntervalMs = lng("public_ip_interval_ms", d.publicIpIntervalMs),
                 deviceIntervalMs = lng("device_interval_ms", d.deviceIntervalMs),
                 motionHz = int("motion_hz", d.motionHz), batterySaver = bool("battery_saver", d.batterySaver),

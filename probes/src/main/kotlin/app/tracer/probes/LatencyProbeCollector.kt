@@ -30,22 +30,31 @@ class LatencyProbeCollector @Inject constructor(
         val base = settings.latencyIntervalMs.coerceAtLeast(500L)
         val recent = ArrayDeque<Double?>()
         var interval = base
-        while (isActive) {
-            ctx.signals.awaitResumed()
-            for (sample in runSet(ctx, settings)) {
-                send(sample)
-                ctx.status.sample(id, sample.stamp.tMonoNs)
-                recent.addLast(if (sample.success) sample.totalMs else null)
-                while (recent.size > 10) recent.removeFirst()
+        if (settings.dualPathProbing) networks.acquireCellular()
+        try {
+            while (isActive) {
+                ctx.signals.awaitResumed()
+                val default = networks.current()
+                for (sample in runSet(ctx, settings, default)) {
+                    send(sample)
+                    ctx.status.sample(id, sample.stamp.tMonoNs)
+                    recent.addLast(if (sample.success) sample.connectMs ?: sample.totalMs else null)
+                    while (recent.size > 10) recent.removeFirst()
+                }
+                // Dual path: while Wi-Fi is the default, also measure the mobile-data path.
+                if (settings.dualPathProbing && default?.isCellular != true) {
+                    networks.cellularIfNotDefault()?.let { cell -> for (sample in runSet(ctx, settings, cell)) send(sample) }
+                }
+                interval = nextLatencyIntervalMs(base, interval, ctx.signals.degraded.value, settings.adaptiveLatency, recent.toList())
+                delay(interval)
             }
-            interval = nextLatencyIntervalMs(base, interval, ctx.signals.degraded.value, settings.adaptiveLatency, recent.toList())
-            delay(interval)
+        } finally {
+            if (settings.dualPathProbing) networks.releaseCellular()
         }
     }
 
-    private suspend fun runSet(ctx: CollectorContext, settings: RunSettings): List<ProbeSample> {
+    private suspend fun runSet(ctx: CollectorContext, settings: RunSettings, bound: BoundNetwork?): List<ProbeSample> {
         val urls = settings.endpoints.map { it.url }
-        val bound = networks.current()
         if (bound == null) {
             return urls.map { url ->
                 ProbeSample(runId = ctx.runId, stamp = ctx.clock.now(), probeType = "latency", endpoint = url, success = false, error = "no_network")
@@ -63,7 +72,8 @@ class LatencyProbeCollector @Inject constructor(
             if (request == null) {
                 ProbeSample(ctx.runId, stamp, "latency", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular)
             } else {
-                val r = HttpProbe.execute(client, request)
+                // Any HTTP response proves the path works (redirects/4xx included); only 5xx counts as failure.
+                val r = HttpProbe.execute(client, request, isSuccess = { it < 500 })
                 ProbeSample(
                     runId = ctx.runId,
                     stamp = stamp,

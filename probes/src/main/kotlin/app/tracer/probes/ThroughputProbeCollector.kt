@@ -57,17 +57,21 @@ class ThroughputProbeCollector @Inject constructor(
             }
             lastRunMs = now
             nextDueMs = now + interval
-            val sample = runOnce(ctx)
+            val default = networks.current()
+            val sample = runOnce(ctx, default)
             send(sample)
             ctx.status.sample(id, sample.stamp.tMonoNs)
+            if (ctx.settings.dualPathProbing && default?.isCellular != true) {
+                networks.cellularIfNotDefault()?.let { send(runOnce(ctx, it)) }
+            }
         }
     }
 
-    private suspend fun runOnce(ctx: CollectorContext): ProbeSample {
+    private suspend fun runOnce(ctx: CollectorContext, network: BoundNetwork?): ProbeSample {
         val settings = ctx.settings.effective()
         val url = throughputUrl(settings.throughputUrl, settings.throughputBytes)
         val stamp = ctx.clock.now()
-        val bound = networks.current()
+        val bound = network
             ?: return ProbeSample(ctx.runId, stamp, "throughput", url, success = false, error = "no_network")
         val request = try {
             Request.Builder().url(url).get().header("Cache-Control", "no-cache").build()
@@ -80,9 +84,11 @@ class ThroughputProbeCollector @Inject constructor(
             .connectTimeout(timeout, TimeUnit.MILLISECONDS)
             .readTimeout(timeout * 2, TimeUnit.MILLISECONDS)
             .build()
-        val r = HttpProbe.execute(client, request, BodyMode.Discard(capBytes = settings.throughputBytes * 2))
+        val r = HttpProbe.execute(client, request, BodyMode.Discard(capBytes = settings.throughputBytes, maxTransferMs = settings.throughputMaxMs))
         val bytes = r.bytes
-        val rate = if (r.success && bytes != null && r.durationNs != null) mbps(bytes, r.durationNs) else null
+        // Rate over the body transfer only (excludes DNS/TCP/TLS/TTFB), so short tests aren't dominated by setup.
+        val transfer = r.transferNs ?: r.durationNs
+        val rate = if (r.success && bytes != null && bytes > 0 && transfer != null) mbps(bytes, transfer) else null
         return ProbeSample(
             runId = ctx.runId,
             stamp = stamp,

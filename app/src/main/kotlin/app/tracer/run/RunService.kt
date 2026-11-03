@@ -524,6 +524,34 @@ class RunService : LifecycleService() {
         }
     }
 
+    /**
+     * Persists collector health transitions (unavailable / degraded / restarted / recovered) as
+     * annotations "collector:<id> <health> — <message>", so an exported bundle explains *why* a
+     * table is empty or sparse (e.g. permission missing, GNSS engine stopped, scan throttling).
+     */
+    private suspend fun recordCollectorHealth(s: Session) {
+        val last = HashMap<String, Triple<CollectorHealth, String?, Int>>()
+        status.state.collect { board ->
+            if (session !== s) return@collect
+            for ((id, st) in board) {
+                val now = Triple(st.health, st.message, st.restarts)
+                val prev = last[id]
+                if (prev == now) continue
+                last[id] = now
+                val changedHealth = prev == null || prev.first != st.health || prev.second != st.message
+                val restarted = prev != null && st.restarts > prev.third
+                if (prev == null && st.health == CollectorHealth.OK) continue // normal start, not news
+                if (!changedHealth && !restarted) continue
+                val text = buildString {
+                    append("collector:").append(id).append(' ').append(st.health.name.lowercase())
+                    if (restarted) append(" restart#").append(st.restarts)
+                    st.message?.let { append(" — ").append(it) }
+                }
+                onSample(s, AnnotationSample(s.run.runId, clock.now(), text, null))
+            }
+        }
+    }
+
     private fun checkLowBattery(s: Session, d: DeviceSample) {
         val level = d.battery ?: return
         if (s.lowBatterySaver || s.settings.batterySaver || d.charging == true || level > LOW_BATTERY_FRACTION) return
@@ -557,6 +585,7 @@ class RunService : LifecycleService() {
         s.loops += scope.launch { while (isActive) { checkStorage(s); delay(STORAGE_CHECK_MS) } }
         s.loops += scope.launch { while (isActive) { delay(PERMISSION_CHECK_MS); checkPermission(s) } }
         s.loops += scope.launch { while (isActive) { delay(WAKELOCK_RENEW_MS); acquireWakeLock() } }
+        s.loops += scope.launch { recordCollectorHealth(s) }
     }
 
     private suspend fun tick(s: Session) {
