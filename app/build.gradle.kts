@@ -26,8 +26,12 @@ android {
         val ciBuild = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = ciBuild
         versionName = "1.0.$ciBuild"
-        // Pixel 6 Pro / Pixel 10 Pro / Galaxy S25 are arm64; x86_64 keeps emulators working.
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Pixel 6 Pro / Pixel 10 Pro / Galaxy S25 are arm64-only targets. For an x86_64 emulator build:
+        //   ./gradlew :app:assembleDebug -Ptracer.emulator=true
+        ndk {
+            abiFilters += "arm64-v8a"
+            if (findProperty("tracer.emulator") == "true") abiFilters += "x86_64"
+        }
         testInstrumentationRunner = "app.tracer.HiltTestRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsKey
         manifestPlaceholders["MAP_BACKEND"] = if (mapsKey.isBlank()) "maplibre" else mapBackend

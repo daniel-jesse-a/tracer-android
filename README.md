@@ -83,7 +83,7 @@ Each CI build gets a higher `versionCode` and the same signing key, so new build
 | Pixel 6 Pro | 13–16 (Tensor G1, Exynos 5123 modem) | dual-SIM (pSIM + eSIM). Cross-check with `*#*#4636#*#*` › Phone information. `nr_state` may be null (Pixel's `ServiceState.toString` omits it); the RAT still comes from display info |
 | Pixel 10 Pro | 16 (Tensor G5) | APK is verified **16 KB page-size compatible** in CI (Android 16 can run with 16 KB pages); same cross-check code as Pixel 6 Pro |
 
-Pixel battery: *Settings › Apps › Tracer › App battery usage › Unrestricted*. Wi-Fi scan throttling: *Settings › System › Developer options › Wi-Fi scan throttling* off (enable Developer options by tapping *About phone › Build number* ×7). The APK contains arm64-v8a (all three phones) and x86_64 (emulator) native libraries.
+Pixel battery: *Settings › Apps › Tracer › App battery usage › Unrestricted*. Wi-Fi scan throttling: *Settings › System › Developer options › Wi-Fi scan throttling* off (enable Developer options by tapping *About phone › Build number* ×7). The APK contains arm64-v8a native libraries (all three phones). For an x86_64 emulator build: `./gradlew :app:assembleDebug -Ptracer.emulator=true`.
 
 ## Event rules and causes
 
