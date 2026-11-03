@@ -12,6 +12,9 @@ class SecondBuilder internal constructor(
     val pos: Pair<Double, Double>, val speedMps: Double, val courseDeg: Double,
 ) {
     internal val out = mutableListOf<Sample>()
+
+    /** Add an arbitrary row to this second (tests / custom scenarios). */
+    fun emit(sample: Sample) { out += sample }
     private var subMs = 0L
 
     /** Each emitted row is spaced 1 ms after the previous one within the second, preserving order. */

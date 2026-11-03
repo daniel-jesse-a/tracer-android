@@ -30,7 +30,7 @@ class V2RulesTest {
         val s = run.build(30) {
             when {
                 t < 10 -> wifi("Office", "aa:01", -70)
-                t < 13 -> out += WifiConnectionSample(runId, stamp())   // link lost
+                t < 13 -> emit(WifiConnectionSample(runId, stamp()))   // link lost
                 else -> wifi("Office", "aa:02", -55)
             }
         }
@@ -54,8 +54,8 @@ class V2RulesTest {
         val s = run.build(60) {
             location(); gnss(12, 38.0); radio("LTE"); serving(1001, 101, -88); path("wifi")
             wifi("Hotel", "cc:01", -55)
-            if (t % 2 == 0) out += ProbeSample(runId, stamp(), "latency", "https://x/generate_204", t < 30, if (t < 30) null else "timeout",
-                connectMs = 20.0, totalMs = 60.0, isCellular = false, httpStatus = if (t < 30) 302 else null, expectedResponse = if (t < 30) false else null)
+            if (t % 2 == 0) emit(ProbeSample(runId, stamp(), "latency", "https://x/generate_204", t < 30, if (t < 30) null else "timeout",
+                connectMs = 20.0, totalMs = 60.0, isCellular = false, httpStatus = if (t < 30) 302 else null, expectedResponse = if (t < 30) false else null))
         }
         val ev = EventEngine("t").replay(s.asSequence())
         assertTrue(ev.none { it.likelyCause == Cause.CAPTIVE || it.eventType == EventType.CAPTIVE_PORTAL })
