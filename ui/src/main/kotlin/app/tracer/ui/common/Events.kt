@@ -7,17 +7,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Bookmark
-import androidx.compose.material.icons.outlined.CompareArrows
+import androidx.compose.material.icons.automirrored.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.GpsOff
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NetworkCell
 import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SwapHoriz
-import androidx.compose.material.icons.outlined.TrendingDown
+import androidx.compose.material.icons.automirrored.outlined.TrendingDown
 import androidx.compose.material.icons.outlined.Web
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.NetworkWifi
@@ -53,11 +53,11 @@ private fun iconFor(eventType: String): ImageVector = when (eventType) {
     "captive_portal" -> Icons.Outlined.Web
     "ip_asn_change" -> Icons.Outlined.Public
     "gps_degraded" -> Icons.Outlined.GpsOff
-    "latency_spike" -> Icons.Outlined.ShowChart
+    "latency_spike" -> Icons.AutoMirrored.Outlined.ShowChart
     "dns_spike" -> Icons.Outlined.Dns
     "annotation", "manual_mark" -> Icons.Outlined.Bookmark
-    "signal_drop" -> Icons.Outlined.TrendingDown
-    "neighbour_overtake" -> Icons.Outlined.CompareArrows
+    "signal_drop" -> Icons.AutoMirrored.Outlined.TrendingDown
+    "neighbour_overtake" -> Icons.AutoMirrored.Outlined.CompareArrows
     "throughput_drop" -> Icons.Outlined.Speed
     else -> Icons.Outlined.Info
 }

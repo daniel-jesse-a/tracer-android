@@ -1,5 +1,8 @@
 package app.tracer.collectors
 
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.putJsonArray
+import android.os.Build
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -103,12 +106,15 @@ class GnssCollector @Inject constructor(
                             runId = ctx.runId,
                             stamp = ctx.clock.now(),
                             measurementCount = measurements.size,
-                            clockJson = clockJson(eventArgs.clock),
+                            clockJson = clockJson(eventArgs),
                             rawJson = buildJsonArray { measurements.forEach { add(measurementJson(it)) } }.toString(),
                         )
                         channel.emitFromCallback(ctx, id, sample)
                     }
 
+                    // Deprecated from API 33 but still the only status signal on Android 12/12L (minSdk 31).
+                    @Deprecated("Deprecated in Java")
+                    @Suppress("DEPRECATION")
                     override fun onStatusChanged(status: Int) {
                         when (status) {
                             GnssMeasurementsEvent.Callback.STATUS_NOT_SUPPORTED -> ctx.status.degraded(id, "Raw GNSS measurements are not supported on this device.")
@@ -130,11 +136,16 @@ class GnssCollector @Inject constructor(
         }
     }.buffer(512)
 
+    @Suppress("DEPRECATION")
+    private fun legacyAgc(m: GnssMeasurement): Double? =
+        if (m.hasAutomaticGainControlLevelDb()) m.automaticGainControlLevelDb else null
+
     private fun JsonObjectBuilder.putFinite(key: String, value: Double) {
         if (value.isFinite()) put(key, value)
     }
 
-    private fun clockJson(c: GnssClock): String = buildJsonObject {
+    private fun clockJson(e: GnssMeasurementsEvent): String = buildJsonObject {
+        val c: GnssClock = e.clock
         put("time_ns", c.timeNanos)
         if (c.hasFullBiasNanos()) put("full_bias_ns", c.fullBiasNanos)
         if (c.hasBiasNanos()) putFinite("bias_ns", c.biasNanos)
@@ -143,6 +154,18 @@ class GnssCollector @Inject constructor(
         if (c.hasLeapSecond()) put("leap_s", c.leapSecond)
         put("hw_discontinuity", c.hardwareClockDiscontinuityCount)
         if (c.hasElapsedRealtimeNanos()) put("elapsed_realtime_ns", c.elapsedRealtimeNanos)
+        // API 33+: AGC is reported per constellation/frequency on the event (replaces per-measurement AGC)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            putJsonArray("agc") {
+                e.gnssAutomaticGainControls.forEach { a ->
+                    addJsonObject {
+                        putFinite("level_db", a.levelDb)
+                        put("constellation", constellationName(a.constellationType))
+                        put("carrier_hz", a.carrierFrequencyHz)
+                    }
+                }
+            }
+        }
     }.toString()
 
     private fun measurementJson(m: GnssMeasurement) = buildJsonObject {
@@ -162,6 +185,6 @@ class GnssCollector @Inject constructor(
         put("multipath", m.multipathIndicator)
         if (m.hasCarrierFrequencyHz()) putFinite("carrier_hz", m.carrierFrequencyHz.toDouble())
         if (m.hasSnrInDb()) putFinite("snr_db", m.snrInDb)
-        if (m.hasAutomaticGainControlLevelDb()) putFinite("agc_db", m.automaticGainControlLevelDb)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) legacyAgc(m)?.let { putFinite("agc_db", it) }
     }
 }

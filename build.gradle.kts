@@ -14,3 +14,11 @@ plugins {
 extra["tracer.compileSdk"] = 36
 extra["tracer.minSdk"] = 31
 extra["tracer.targetSdk"] = 36
+
+// Kotlin 2.2: opt into the future default for annotations on constructor properties (silences
+// "applied to the value parameter only" for @ApplicationContext etc. and matches Kotlin 2.4 behaviour).
+subprojects {
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+        compilerOptions.freeCompilerArgs.add("-Xannotation-default-target=param-property")
+    }
+}
