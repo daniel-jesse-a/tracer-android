@@ -113,17 +113,19 @@ Live Run shows the device's wall-clock offset vs GPS. `runs` stores it at start 
 
 Debug builds expose *Settings › Simulate run* and a Pre-flight toggle. The service then replays a synthetic scenario (`tunnel`, `late_handover`, `sticky_wifi`, `commute`, …) in real time through the real writer, event engine, notification and UI, with no radios needed.
 
-## Status of this drop
+## Status
 
 | | state |
 |---|---|
-| `:core`, `:events` + Android-free helpers from collectors/probes/pairing/app/ui | **compiled and 74 unit tests passing** — `tools/verify-jvm.sh` (no Android SDK or network needed) |
-| Android modules (Room, collectors, OkHttp probes, RunService, Compose UI) | written against the documented APIs and reviewed file by file for override and Hilt-graph consistency, API-level guards and resource references; **not yet compiled**, because the authoring environment had no Android SDK or Google Maven |
+| Full Android build (`:app:assembleDebug`) | **green on GitHub Actions** — 0 compiler errors, 0 warnings |
+| Unit tests (all 9 modules, incl. Robolectric storage/export) + `lintDebug` (7 Android modules) | **passing** |
+| Offline check without the Android SDK | `tools/verify-jvm.sh` — compiles `:core` and `:events` as separate modules + Android-free helpers, 74 tests |
 
-First build in Android Studio:
-1. `./gradlew assembleDebug`. Expect a short fix-up pass for any library API signature drift. The reviewers' least-certain spots: CameraX `ProcessCameraProvider.getInstance` (switch to `awaitInstance` if Guava's `ListenableFuture` is not on the classpath), OkHttp 5 `EventListener` signatures, Wi-Fi 7 `MloLink` getters, and MapLibre `GeoJsonOptions` clustering.
-2. Commit the Room schema `storage/schemas/app.tracer.storage.TracerDatabase/1.json` that KSP generates on first build. The migration test needs it.
-3. Optional: add the Roboto Mono TTFs (see `ui/.../theme/Theme.kt`). Until then numbers use the platform monospace.
-4. `./gradlew test lint`, then `connectedDebugAndroidTest` on the S25.
+Every push builds a debug APK: *Actions › latest "Android build" run › Artifacts › `tracer-debug-apk`*. It is signed with the committed debug key (`app/debug.keystore`, debug-only), so new builds install over old ones.
+
+Still to do on a device:
+- Commit the Room schema JSON that KSP generates on the first local build (`storage/schemas/…/1.json`), which the migration test needs.
+- Run `./gradlew :app:connectedDebugAndroidTest` with the phone attached (service-lifecycle test).
+- Optional: add the Roboto Mono TTFs (see `ui/.../theme/Theme.kt`).
 
 Known limitations: the MapLibre default style (OpenFreeMap *liberty*) is light, so the dark map chrome from the design applies only on Google Maps; Live Run notes on End Run are not persisted (name only); library search matches name, mode and run ID (not PCI/SSID).
