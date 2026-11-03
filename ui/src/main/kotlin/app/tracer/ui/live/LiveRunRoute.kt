@@ -1,14 +1,13 @@
 package app.tracer.ui.live
 
-import app.tracer.core.runtime.FixAction
-import androidx.compose.ui.platform.LocalContext
-import android.provider.Settings
-import android.net.Uri
-import android.content.Intent
-import android.content.Context
 import android.content.ActivityNotFoundException
-import androidx.compose.foundation.background
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,42 +15,29 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,101 +48,144 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.tracer.core.model.EventSample
+import app.tracer.core.model.RunRecord
 import app.tracer.core.model.RunState
-import app.tracer.core.runtime.CollectorHealth
+import app.tracer.core.report.Carrier
+import app.tracer.core.report.LiveWords
+import app.tracer.core.report.Plain
+import app.tracer.core.report.Verdict
 import app.tracer.core.runtime.CollectorStatus
+import app.tracer.core.runtime.FixAction
+import app.tracer.core.runtime.LiveSnapshot
 import app.tracer.ui.R
 import app.tracer.ui.components.map.MapLayer
 import app.tracer.ui.components.map.TrackMap
 import app.tracer.ui.components.map.mapLayerTitle
 import app.tracer.ui.event.EventDetailSheet
+import app.tracer.ui.kit.Card
+import app.tracer.ui.kit.Dot
+import app.tracer.ui.kit.K
+import app.tracer.ui.kit.PillKind
+import app.tracer.ui.kit.Screen
+import app.tracer.ui.kit.SlimBar
+import app.tracer.ui.kit.TileRow
+import app.tracer.ui.kit.VerdictTile
+import app.tracer.ui.kit.tc
 import app.tracer.ui.panels.CellsPanel
 import app.tracer.ui.panels.GnssPanel
 import app.tracer.ui.panels.WifiPanel
 import app.tracer.ui.theme.LocalTracerColors
 import app.tracer.ui.theme.Mono
 import app.tracer.ui.theme.Space
+import app.tracer.ui.theme.TType
+import kotlin.math.roundToInt
 
+/** Design frame 2: header + progress, plain headline, compact map, 2×2 verdict tiles, "So far", Mark · Pause · Finish. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit) {
+fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSignals: () -> Unit, onOpenSettings: () -> Unit) {
     val vm: LiveRunViewModel = hiltViewModel()
     val snap by vm.snapshot.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val mapData by vm.mapData.collectAsStateWithLifecycle()
     val layer by vm.layer.collectAsStateWithLifecycle()
-    val tab by vm.tab.collectAsStateWithLifecycle()
     val banners by vm.banners.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
-    val stats by vm.stats.collectAsStateWithLifecycle()
     val run by vm.run.collectAsStateWithLifecycle()
-    val selectedSub by vm.selectedSub.collectAsStateWithLifecycle()
-    val protocol by vm.protocol.collectAsStateWithLifecycle()
+    val limitMs by vm.limitMs.collectAsStateWithLifecycle()
+    val timeline by vm.timeline.collectAsStateWithLifecycle()
+    val engineer by vm.engineerView.collectAsStateWithLifecycle()
     val pendingWaypoint by vm.pendingWaypoint.collectAsStateWithLifecycle()
     val ended by rememberUpdatedState(onRunEnded)
     LaunchedEffect(vm) { vm.ended.collect { ended(it) } }
 
     var showMark by rememberSaveable { mutableStateOf(false) }
     var showEnd by rememberSaveable { mutableStateOf(false) }
+    var showDetails by rememberSaveable { mutableStateOf(false) }
     val active = state == RunState.RECORDING || state == RunState.PAUSED
+    val context = LocalContext.current
 
-    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            // ---- map, top ~40 %
-            Box(Modifier.fillMaxWidth().weight(0.4f)) {
+    Screen {
+        LiveHeader(run, state, snap.elapsedMs, limitMs)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            val wifiRssi = snap.wifi?.rssiDbm
+            val (head, sub) = if (timeline.known) {
+                LiveWords.headline(timeline.carrier, wifiRssi, timeline.sinceS, timeline.nowS)
+            } else {
+                (if (state == RunState.PREFLIGHT) "Starting…" else "Checking the network") to "Measuring…"
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(head, style = TType.largeTitle.copy(fontSize = 30.sp, lineHeight = 36.sp), color = tc.text)
+            Text(sub, style = TType.sub.copy(fontSize = 17.sp), color = tc.text2, modifier = Modifier.padding(top = 2.dp))
+            Spacer(Modifier.height(14.dp))
+
+            // ---- compact map
+            Box(Modifier.fillMaxWidth().height(170.dp).clip(RoundedCornerShape(K.cardRadius)).background(tc.map)) {
                 TrackMap(
                     points = mapData.points,
                     layer = layer,
                     modifier = Modifier.fillMaxSize(),
                     follow = true,
-                    towers = listOfNotNull(mapData.tower),
-                    taRing = mapData.taRing,
+                    towers = if (engineer) listOfNotNull(mapData.tower) else emptyList(),
+                    taRing = if (engineer) mapData.taRing else null,
                     events = mapData.events,
                     onEventClick = vm::openEventAt,
                     selectedEventId = selected?.event?.stamp?.tMonoNs,
+                    showLegend = false,
                 )
-                Column(Modifier.statusBarsPadding().padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    RunPill(
-                        elapsedMs = snap.elapsedMs,
-                        state = state,
-                        mode = modeLabel(run?.mode),
-                        distance = Fmt.distance(snap.distanceM),
-                        // protocol countdown: fixed duration − recorded (un-paused) time
-                        remainingMs = protocol?.let { p -> (p.durationS * 1_000L - snap.elapsedMs).coerceAtLeast(0L) },
-                    )
-                    LayerChips(layer, vm::setLayer)
+                val acc = snap.location?.hAccM
+                Box(
+                    Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(50))
+                        .background(Color(0xCC1C1C1E)).padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(if (acc != null) "You · ±${acc.roundToInt()} m" else "You · finding position", style = TType.footnote.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), color = Color(0xFFF5F5F7))
                 }
             }
-            banners.forEach { b -> CollectorBanner(b, onOpenSettings) }
-            // ---- tabs
-            val tabs = LiveTab.entries
-            PrimaryTabRow(selectedTabIndex = tabs.indexOf(tab)) {
-                tabs.forEach { t ->
-                    Tab(selected = tab == t, onClick = { vm.setTab(t) }, text = { Text(tabLabel(t)) })
+
+            // ---- collector problems (Fix routes to the place that changes it)
+            if (banners.isNotEmpty()) {
+                Spacer(Modifier.height(K.gap))
+                Card(padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
+                    banners.forEach { b -> BannerLine(b) { fix -> openFix(context, fix, onOpenSettings) } }
                 }
             }
-            Box(Modifier.weight(0.6f).fillMaxWidth()) {
-                when (tab) {
-                    LiveTab.LIVE -> LiveOverview(snap, stats, onEventClick = vm::openEvent)
-                    LiveTab.CELLS -> CellsPanel(snap, stats, selectedSub, vm::selectSub)
-                    LiveTab.WIFI -> WifiPanel(snap)
-                    LiveTab.GNSS -> GnssPanel(snap)
+
+            Spacer(Modifier.height(6.dp))
+            Tiles(snap, timeline.carrier, onOpenSignals)
+
+            Spacer(Modifier.height(6.dp))
+            SoFar(snap, timeline, onMoment = vm::openEvent)
+
+            if (engineer) {
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    LinkText("Details") { showDetails = true }
+                    LinkText("Signals") { onOpenSignals() }
+                    LinkText("Settings") { onOpenSettings() }
                 }
             }
-            LiveActionRow(
-                state = state, enabled = active,
-                onMark = vm::tapWaypoint,
-                onMarkLong = { showMark = true },
-                onPauseResume = { if (state == RunState.PAUSED) vm.resume() else vm.pause() },
-                onEnd = { showEnd = true },
-            )
+            Spacer(Modifier.height(16.dp))
+        }
+        // ---- actions
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(top = 8.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(K.gap),
+        ) {
+            ActionPill("Mark", PillKind.SECONDARY, active, Modifier.weight(1f), onClick = vm::tapWaypoint, onLongClick = { showMark = true })
+            ActionPill(if (state == RunState.PAUSED) "Resume" else "Pause", PillKind.SECONDARY, active, Modifier.weight(1f),
+                onClick = { if (state == RunState.PAUSED) vm.resume() else vm.pause() })
+            ActionPill("Finish", PillKind.PRIMARY, active, Modifier.weight(1.15f), onClick = { showEnd = true })
         }
     }
 
@@ -165,27 +194,185 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSettings: () -> Unit
     if (showEnd) {
         AlertDialog(
             onDismissRequest = { showEnd = false },
-            title = { Text(stringResource(R.string.live_end_title)) },
-            text = { Text(stringResource(R.string.live_end_message)) },
-            confirmButton = {
-                Button(
-                    onClick = { showEnd = false; vm.stop() },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) { Text(stringResource(R.string.live_end_confirm)) }
-            },
-            dismissButton = { TextButton(onClick = { showEnd = false }) { Text(stringResource(R.string.live_cancel)) } },
+            containerColor = tc.card,
+            title = { Text("Finish this test?", color = tc.text) },
+            text = { Text("Recording stops and the summary opens.", color = tc.text2) },
+            confirmButton = { TextButton(onClick = { showEnd = false; vm.stop() }) { Text("Finish", color = tc.link, fontWeight = FontWeight.SemiBold) } },
+            dismissButton = { TextButton(onClick = { showEnd = false }) { Text("Keep going", color = tc.link) } },
         )
     }
+    if (showDetails && engineer) DetailsSheet(vm, snap, onDismiss = { showDetails = false })
 
     selected?.let { sel ->
-        val context = rememberTrackSeries(snap.track)
+        val series = rememberTrackSeries(snap.track)
         EventDetailSheet(
-            event = sel.event, eventId = sel.eventId, label = sel.label, contextSeries = context,
+            event = sel.event, eventId = sel.eventId, label = sel.label, contextSeries = series,
             onLabelChange = vm::setLabel, onDismiss = vm::closeEvent, runStartMonoNs = snap.startedMonoNs,
         )
+    }
+}
+
+/** "● Office · Test 4          01:24 / 10:00" + thin progress line. */
+@Composable
+private fun LiveHeader(run: RunRecord?, state: RunState, elapsedMs: Long, limitMs: Long?) {
+    val title = run?.let { r ->
+        val site = r.site
+        val n = r.testNumber
+        if (site != null && n != null) "$site · Test $n" else r.name
+    } ?: "Test"
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically) {
+            Dot(if (state == RunState.RECORDING) tc.bad else tc.text3, 10.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (state == RunState.PAUSED) "$title · Paused" else title,
+                style = TType.body.copy(fontWeight = FontWeight.SemiBold), color = tc.text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            Text(
+                Fmt.mmss(elapsedMs) + (limitMs?.let { " / " + Fmt.mmss(it) } ?: ""),
+                style = TType.body.merge(TType.num).copy(fontWeight = FontWeight.Normal), color = tc.text3,
+            )
+        }
+        if (limitMs != null && limitMs > 0) {
+            Spacer(Modifier.height(10.dp))
+            val frac = (elapsedMs.toFloat() / limitMs).coerceIn(0f, 1f)
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(tc.card2)) {
+                Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(tc.text))
+            }
+        }
+    }
+}
+
+/** Wi-Fi · Mobile data · Response · Position. */
+@Composable
+private fun Tiles(snap: LiveSnapshot, carrier: Carrier, onOpenSignals: () -> Unit) {
+    val wifi = snap.wifi
+    val rssi = wifi?.rssiDbm
+    val wifiV = Verdict.wifiRssi(rssi?.toDouble())
+    val serving = snap.primaryServing
+    val rsrp = serving?.rsrp
+    val mobileV = Verdict.rsrp(rsrp?.toDouble())
+    val tech = (snap.rat ?: serving?.rat)?.let { Plain.ratPlain(it) }
+    val rtt = snap.latencyMs
+    val acc = snap.location?.hAccM
+    TileRow {
+        VerdictTile(
+            "Wi-Fi", if (rssi != null) Fmt.int(rssi) else "Off", wifiV, Modifier.weight(1f),
+            unit = if (rssi != null) "dBm" else null, onClick = onOpenSignals,
+            verdictText = if (rssi == null) (if (wifi == null) "Not connected" else "No data") else wifiV.label,
+        )
+        VerdictTile(
+            "Mobile data",
+            when {
+                tech == null && serving == null -> "No signal"
+                else -> "${tech ?: "—"} · ${if (carrier == Carrier.MOBILE) "in use" else "ready"}"
+            },
+            mobileV, Modifier.weight(1f), onClick = onOpenSignals,
+        )
+    }
+    TileRow {
+        VerdictTile("Response", Fmt.d0(rtt), Verdict.response(rtt), Modifier.weight(1f), unit = if (rtt != null) "ms" else null, onClick = onOpenSignals)
+        VerdictTile("Position", if (acc != null) "±${acc.roundToInt()}" else Fmt.DASH, Verdict.position(acc), Modifier.weight(1f),
+            unit = if (acc != null) "m" else null, onClick = onOpenSignals)
+    }
+}
+
+/** "So far" card: switches · hops, carrier bar, latest moments. */
+@Composable
+private fun SoFar(snap: LiveSnapshot, timeline: LiveTimeline, onMoment: (EventSample) -> Unit) {
+    val switches = timeline.segments.zipWithNext().count { (a, b) -> a.carrier != b.carrier }
+    val hops = snap.recentEvents.count { it.eventType == "wifi_roam" }
+    val start = snap.startedMonoNs
+    val moments = snap.recentEvents.mapNotNull { e -> Plain.title(e)?.let { e to it } }.take(3)
+    Card(padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("So far", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3, modifier = Modifier.weight(1f))
+            Text(
+                if (switches == 0 && hops == 0) "No switches yet"
+                else "$switches ${if (switches == 1) "switch" else "switches"} · $hops Wi-Fi ${if (hops == 1) "hop" else "hops"}",
+                style = TType.sub.copy(fontSize = 16.sp), color = tc.text3,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        SlimBar(timeline.segments, timeline.nowS, height = 8.dp)
+        if (moments.isNotEmpty()) Spacer(Modifier.height(8.dp))
+        moments.forEach { (e, title) ->
+            val at = start?.let { (e.stamp.tMonoNs - it) / 1_000_000L }
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onMoment(e) }.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(at?.let { Fmt.mmss(it) } ?: Fmt.DASH, style = TType.sub.copy(fontSize = 16.sp).merge(TType.num), color = tc.text3, modifier = Modifier.width(56.dp))
+                Text(title, style = TType.bodyRegular, color = tc.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** "● Wi-Fi scans throttled …  Fix" — compact, no stripe. */
+@Composable
+private fun BannerLine(status: CollectorStatus, onFix: (FixAction) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Dot(tc.average, 8.dp)
+        Spacer(Modifier.width(10.dp))
+        Text(status.message.orEmpty(), style = TType.sub, color = tc.text2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        // Only offer "Fix" when there is something the user can change.
+        val fix = status.fix
+        if (fix != null) {
+            Spacer(Modifier.width(8.dp))
+            LinkText("Fix") { onFix(fix) }
+        }
+    }
+}
+
+@Composable
+private fun LinkText(text: String, onClick: () -> Unit) {
+    Text(
+        text, style = TType.label.copy(fontSize = 16.sp), color = tc.link,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(vertical = 6.dp, horizontal = 2.dp),
+    )
+}
+
+/** Kit-style pill with an optional long-press (Mark: tap = waypoint, hold = note). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ActionPill(
+    text: String, kind: PillKind, enabled: Boolean, modifier: Modifier,
+    onClick: () -> Unit, onLongClick: (() -> Unit)? = null, height: Dp = 56.dp,
+) {
+    val bg = if (kind == PillKind.PRIMARY) tc.primaryBtn else tc.card
+    val fg = if (kind == PillKind.PRIMARY) tc.onPrimaryBtn else tc.text
+    Box(
+        modifier.height(height).clip(RoundedCornerShape(K.pillRadius)).background(if (enabled) bg else tc.card2)
+            .combinedClickable(enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, style = TType.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp), color = if (enabled) fg else tc.text3) }
+}
+
+/** Engineer view: the v1 tabbed panels (overview · cells · Wi-Fi · GNSS). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DetailsSheet(vm: LiveRunViewModel, snap: LiveSnapshot, onDismiss: () -> Unit) {
+    val tab by vm.tab.collectAsStateWithLifecycle()
+    val stats by vm.stats.collectAsStateWithLifecycle()
+    val selectedSub by vm.selectedSub.collectAsStateWithLifecycle()
+    val layer by vm.layer.collectAsStateWithLifecycle()
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = MaterialTheme.colorScheme.surface) {
+        LayerChips(layer, vm::setLayer, Modifier.padding(horizontal = Space.m, vertical = Space.xs))
+        val tabs = LiveTab.entries
+        PrimaryTabRow(selectedTabIndex = tabs.indexOf(tab)) {
+            tabs.forEach { t -> Tab(selected = tab == t, onClick = { vm.setTab(t) }, text = { Text(tabLabel(t)) }) }
+        }
+        Box(Modifier.fillMaxWidth().height(560.dp)) {
+            when (tab) {
+                LiveTab.LIVE -> LiveOverview(snap, stats, onEventClick = vm::openEvent)
+                LiveTab.CELLS -> CellsPanel(snap, stats, selectedSub, vm::selectSub)
+                LiveTab.WIFI -> WifiPanel(snap)
+                LiveTab.GNSS -> GnssPanel(snap)
+            }
+        }
     }
 }
 
@@ -231,39 +418,6 @@ internal fun remainingLabel(ms: Long): String {
     else String.format(java.util.Locale.ROOT, "%02d:%02d", total / 60, total % 60)
 }
 
-/** Floating 28 dp pill: red dot · 00:42:17 · Train · 61.4 km [· 06:12 left] */
-@Composable
-private fun RunPill(elapsedMs: Long, state: RunState, mode: String, distance: String, remainingMs: Long? = null) {
-    val colors = LocalTracerColors.current
-    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            val dot = when (state) {
-                RunState.RECORDING -> colors.critical
-                RunState.PAUSED -> colors.warning
-                else -> colors.noData
-            }
-            Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
-            Spacer(Modifier.width(8.dp))
-            Text(Fmt.hms(elapsedMs), style = Mono.value)
-            Spacer(Modifier.width(8.dp))
-            val sub = listOf(mode, distance).filter { it.isNotEmpty() }.joinToString(" · ")
-            val text = if (state == RunState.PAUSED) stringResource(R.string.live_state_paused) + " · " + sub else sub
-            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (remainingMs != null) {
-                Spacer(Modifier.width(8.dp))
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
-                    Text(
-                        stringResource(R.string.live_protocol_left, remainingLabel(remainingMs)),
-                        style = Mono.small,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
 /** "Waypoint N · add label (optional)" — Save / Skip both record the waypoint with its tap time; dismiss = Skip. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -287,81 +441,6 @@ private fun WaypointSheet(p: PendingWaypoint, onCommit: (String?) -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.End)) {
                 TextButton(onClick = { onCommit(null) }) { Text(stringResource(R.string.live_waypoint_skip)) }
                 Button(onClick = { onCommit(label) }) { Text(stringResource(R.string.live_waypoint_save)) }
-            }
-        }
-    }
-}
-
-/** Square tonal Mark (tap = waypoint, long-press = note) · square tonal Pause · wide End-run pill in errorContainer. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun LiveActionRow(state: RunState, enabled: Boolean, onMark: () -> Unit, onMarkLong: () -> Unit, onPauseResume: () -> Unit, onEnd: () -> Unit) {
-    val square = RoundedCornerShape(16.dp)
-    Row(
-        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.l, vertical = Space.m),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Tonal square like the icon buttons, but with a long-press (FilledTonalIconButton has none).
-        val markCd = stringResource(R.string.live_mark)
-        val container = if (enabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-        val content = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(square)
-                .background(container)
-                .combinedClickable(enabled = enabled, role = Role.Button, onClick = onMark, onLongClick = onMarkLong)
-                .semantics { contentDescription = markCd },
-            contentAlignment = Alignment.Center,
-        ) {
-            CompositionLocalProvider(LocalContentColor provides content) { Icon(Icons.Filled.Bookmark, contentDescription = null) }
-        }
-        val paused = state == RunState.PAUSED
-        FilledTonalIconButton(onClick = onPauseResume, enabled = enabled, shape = square, modifier = Modifier.size(56.dp)) {
-            Icon(
-                if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                contentDescription = stringResource(if (paused) R.string.live_resume else R.string.live_pause),
-            )
-        }
-        Button(
-            onClick = onEnd, enabled = enabled,
-            shape = RoundedCornerShape(28.dp),
-            modifier = Modifier.weight(1f).height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
-        ) {
-            Icon(Icons.Filled.Stop, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.live_end))
-        }
-    }
-}
-
-@Composable
-private fun CollectorBanner(status: CollectorStatus, onOpenSettings: () -> Unit) {
-    val colors = LocalTracerColors.current
-    val tint = if (status.health == CollectorHealth.UNAVAILABLE) colors.critical else colors.warning
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.xs),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Row(Modifier.padding(horizontal = Space.m, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Warning, contentDescription = null, tint = tint)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(status.id, style = Mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(status.message.orEmpty(), style = MaterialTheme.typography.bodySmall)
-            }
-            // Only offer "Fix" when there is something the user can change, and send them to the
-            // place that changes it (Android permissions / Location / Developer options — not Tracer settings).
-            val fix = status.fix
-            if (fix != null) {
-                val context = LocalContext.current
-                TextButton(onClick = { openFix(context, fix, onOpenSettings) }) { Text(stringResource(R.string.live_fix)) }
             }
         }
     }

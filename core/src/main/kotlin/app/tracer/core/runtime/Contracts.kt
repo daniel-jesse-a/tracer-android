@@ -169,12 +169,22 @@ interface RunController {
     val live: StateFlow<LiveSnapshot>
     val runId: StateFlow<String?>
     /**
+     * Recorded-time budget of the current run in ms (protocol duration or the length limit passed to
+     * [start]); null = open-ended. Default: always null (implementations without auto-stop).
+     */
+    val limitMs: StateFlow<Long?> get() = NO_LIMIT
+    /**
      * @param site where the run is recorded ("Office"); the service assigns the next test number for the
      *        site and names the run "Office · T3 · 2026-11-03 18:31" (falls back to [name] when null).
      * @param protocolId a [app.tracer.core.analysis.Protocol] id: fixed settings + fixed duration (auto-stop);
      *        [settings] is ignored when set.
+     * @param durationLimitMs auto-stop after this much recorded (un-paused) time; null = no limit.
+     *        A protocol's own duration wins when both are set.
      */
-    fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String? = null, site: String? = null, protocolId: String? = null)
+    fun start(
+        name: String, mode: String, settings: RunSettings, simulateScenario: String? = null, site: String? = null, protocolId: String? = null,
+        durationLimitMs: Long? = null,
+    )
     fun pause()
     fun resume()
     fun stop()
@@ -182,6 +192,8 @@ interface RunController {
     /** Tap-to-mark: [tappedAt] is captured at the tap; the label may be added afterwards (null = unlabeled). */
     fun markWaypoint(label: String?, tappedAt: Stamp)
 }
+
+private val NO_LIMIT: StateFlow<Long?> = MutableStateFlow<Long?>(null).asStateFlow()
 
 /** :collectors. Active SIMs for pre-flight + per-subscription TelephonyManager. */
 data class SimInfo(val subscriptionId: Int, val slotIndex: Int, val carrierName: String?, val mccMnc: String?, val isDefaultData: Boolean, val isEmbedded: Boolean)

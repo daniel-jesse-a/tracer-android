@@ -8,6 +8,7 @@ import app.tracer.core.analysis.Protocol
 import app.tracer.core.cell.CellNormalizer
 import app.tracer.core.model.CellSample
 import app.tracer.core.model.EventSample
+import app.tracer.core.model.NetworkPathSample
 import app.tracer.core.model.RunRecord
 import app.tracer.core.model.RunState
 import app.tracer.core.model.Stamp
@@ -21,7 +22,10 @@ import app.tracer.core.runtime.RunRepository
 import app.tracer.core.runtime.TowerLocation
 import app.tracer.core.runtime.TowerLookup
 import app.tracer.core.runtime.TrackPoint
+import app.tracer.core.report.Carrier
+import app.tracer.core.report.Segment
 import app.tracer.core.util.Stats
+import app.tracer.ui.settings.SettingsRepository
 import app.tracer.ui.components.map.EventMarker
 import app.tracer.ui.components.map.MapLayer
 import app.tracer.ui.components.map.MapPoint
@@ -84,6 +88,20 @@ data class SelectedEvent(val event: EventSample, val eventId: Long, val label: S
 
 enum class LiveTab { LIVE, CELLS, WIFI, GNSS }
 
+/**
+ * Network timeline of the running test, seconds on the run clock (start → now, pauses included).
+ * [sinceS] = when the current [carrier] took over.
+ */
+@Immutable
+data class LiveTimeline(
+    val segments: List<Segment> = emptyList(),
+    val carrier: Carrier = Carrier.NONE,
+    val sinceS: Double? = null,
+    val nowS: Double = 0.0,
+    /** false until the first network-path sample arrived */
+    val known: Boolean = false,
+)
+
 /** Stable identity of a neighbour within a subscription (for overtake tracking). */
 internal fun neighbourKey(sub: Int, c: CellSample): String = "$sub:${c.rat}:${c.pci}@${c.earfcnOrArfcn}"
 
@@ -94,10 +112,16 @@ class LiveRunViewModel @Inject constructor(
     private val repository: RunRepository,
     private val towerLookup: TowerLookup,
     statusBoard: CollectorStatusBoard,
+    settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     val snapshot: StateFlow<LiveSnapshot> = controller.live
     val state: StateFlow<RunState> = controller.state
+    /** Recorded-time budget (protocol duration or chosen length), ms; null = no limit. */
+    val limitMs: StateFlow<Long?> = controller.limitMs
+    /** Settings › Advanced › Engineer view: shows the detailed panels. */
+    val engineerView: StateFlow<Boolean> = settingsRepository.engineerView
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _layer = MutableStateFlow(MapLayer.QUALITY)
     val layer: StateFlow<MapLayer> = _layer.asStateFlow()
@@ -274,6 +298,62 @@ class LiveRunViewModel @Inject constructor(
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveMapData())
+
+    // ---------------------------------------------------------------- network timeline
+
+    private val _timeline = MutableStateFlow(LiveTimeline())
+    val timeline: StateFlow<LiveTimeline> = _timeline.asStateFlow()
+
+    // Only touched by the single collector in init below.
+    private var tlRunId: String? = null
+    private val tlSegs = ArrayList<Segment>()
+
+    private fun appendCarrier(c: Carrier, atS: Double) {
+        val last = tlSegs.lastOrNull()
+        when {
+            last == null -> tlSegs += Segment(atS, atS, c)
+            last.carrier == c -> tlSegs[tlSegs.lastIndex] = last.copy(toS = maxOf(last.toS, atS))
+            else -> { tlSegs[tlSegs.lastIndex] = last.copy(toS = maxOf(last.toS, atS)); tlSegs += Segment(maxOf(last.toS, atS), atS, c) }
+        }
+    }
+
+    /** Path changes recorded before this screen opened (screen re-opened mid-run). */
+    private suspend fun backfill(runId: String, startedMonoNs: Long) {
+        val paths = runCatching { repository.samples(runId, Table.NETWORK_PATH) }.getOrNull().orEmpty()
+        for (p in paths) {
+            if (p !is NetworkPathSample) continue
+            val t = ((p.stamp.tMonoNs - startedMonoNs) / 1e9).coerceAtLeast(0.0)
+            appendCarrier(Carrier.of(p.primaryInterface, p.status), t)
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            controller.live.collect { snap ->
+                val id = snap.runId
+                val active = snap.state == RunState.RECORDING || snap.state == RunState.PAUSED
+                if (id == null || !active) return@collect
+                if (id != tlRunId) {
+                    tlRunId = id
+                    tlSegs.clear()
+                    val started = snap.startedMonoNs
+                    if (started != null) backfill(id, started)
+                }
+                val nowS = (snap.elapsedMs + snap.pausedMs) / 1000.0
+                val known = snap.transport != null || snap.pathStatus != null
+                if (known) appendCarrier(Carrier.of(snap.transport, snap.pathStatus), nowS)
+                else tlSegs.lastOrNull()?.let { l -> tlSegs[tlSegs.lastIndex] = l.copy(toS = maxOf(l.toS, nowS)) }
+                val cur = tlSegs.lastOrNull()
+                _timeline.value = LiveTimeline(
+                    segments = tlSegs.toList(),
+                    carrier = cur?.carrier ?: Carrier.NONE,
+                    sinceS = cur?.fromS,
+                    nowS = nowS,
+                    known = cur != null,
+                )
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- run end
 

@@ -3,6 +3,7 @@ package app.tracer.run
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import app.tracer.core.analysis.Protocol
 import app.tracer.core.config.RunSettings
 import app.tracer.core.model.RunState
 import app.tracer.core.model.Stamp
@@ -32,14 +33,20 @@ class RunControllerFacade @Inject constructor(
     private val _state = MutableStateFlow(RunState.IDLE)
     private val _live = MutableStateFlow(LiveSnapshot())
     private val _runId = MutableStateFlow<String?>(null)
+    private val _limitMs = MutableStateFlow<Long?>(null)
 
     override val state: StateFlow<RunState> = _state.asStateFlow()
     override val live: StateFlow<LiveSnapshot> = _live.asStateFlow()
     override val runId: StateFlow<String?> = _runId.asStateFlow()
+    override val limitMs: StateFlow<Long?> = _limitMs.asStateFlow()
 
-    override fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String?, site: String?, protocolId: String?) {
+    override fun start(
+        name: String, mode: String, settings: RunSettings, simulateScenario: String?, site: String?, protocolId: String?,
+        durationLimitMs: Long?,
+    ) {
         if (_state.value != RunState.IDLE) return
         _runId.value = null
+        _limitMs.value = Protocol.byId(protocolId)?.let { it.durationS * 1_000L } ?: durationLimitMs?.takeIf { it > 0L }
         _live.value = LiveSnapshot(state = RunState.PREFLIGHT)
         _state.value = RunState.PREFLIGHT
         val intent = RunService.intent(context, RunService.ACTION_START)
@@ -49,6 +56,7 @@ class RunControllerFacade @Inject constructor(
             .putExtra(RunService.EXTRA_SCENARIO, simulateScenario)
             .putExtra(RunService.EXTRA_SITE, site?.trim()?.takeIf { it.isNotEmpty() })
             .putExtra(RunService.EXTRA_PROTOCOL, protocolId)
+        if (durationLimitMs != null && durationLimitMs > 0L) intent.putExtra(RunService.EXTRA_DURATION_LIMIT_MS, durationLimitMs)
         try {
             context.startForegroundService(intent)
         } catch (e: Exception) { // ForegroundServiceStartNotAllowedException (app in background) / SecurityException
@@ -104,6 +112,7 @@ class RunControllerFacade @Inject constructor(
     // ---- written by RunService (same module) ----
     internal fun publishState(state: RunState) { _state.value = state }
     internal fun publishRunId(runId: String?) { _runId.value = runId }
+    internal fun publishLimit(limitMs: Long?) { _limitMs.value = limitMs }
     internal fun publishLive(snapshot: LiveSnapshot) { _live.value = snapshot }
 
     private companion object { const val TAG = "RunControllerFacade" }

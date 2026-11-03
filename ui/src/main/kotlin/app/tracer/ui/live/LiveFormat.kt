@@ -30,6 +30,13 @@ internal object Fmt {
         return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%d:%02d", m, s)
     }
 
+    /** 01:24 (two-digit minutes) · 1:02:33 above an hour */
+    fun mmss(ms: Long): String {
+        val totalS = (ms.coerceAtLeast(0) / 1000)
+        return if (totalS >= 3600) String.format(Locale.US, "%d:%02d:%02d", totalS / 3600, (totalS % 3600) / 60, totalS % 60)
+        else String.format(Locale.US, "%02d:%02d", totalS / 60, totalS % 60)
+    }
+
     /** 00:42:17 */
     fun hms(ms: Long): String {
         val totalS = (ms.coerceAtLeast(0) / 1000)

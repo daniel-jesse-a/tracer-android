@@ -7,12 +7,13 @@ import androidx.lifecycle.viewModelScope
 import app.tracer.core.config.ProbeEndpoint
 import app.tracer.core.config.RunSettings
 import app.tracer.core.config.Thresholds
-import app.tracer.ui.R
-import app.tracer.ui.common.UiText
+import app.tracer.core.runtime.RunRepository
+import app.tracer.ui.companion.CompanionDevices
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -22,29 +23,46 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    runs: RunRepository,
     @ApplicationContext context: Context,
 ) : ViewModel() {
 
-    /** null until the first DataStore read completes. */
-    val settings: StateFlow<RunSettings?> =
-        repository.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private fun <T> kotlinx.coroutines.flow.Flow<T>.state(initial: T): StateFlow<T> =
+        stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)
 
-    val simScenario: StateFlow<String?> =
-        repository.debugSimScenario.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /** null until the first DataStore read completes. */
+    val settings: StateFlow<RunSettings?> = repository.settings.map<RunSettings, RunSettings?> { it }.state(null)
+    val simScenario: StateFlow<String?> = repository.debugSimScenario.state(null)
+    val themeMode: StateFlow<String> = repository.themeMode.state("dark")
+    val engineerView: StateFlow<Boolean> = repository.engineerView.state(false)
+    val defaultNetworks: StateFlow<String> = repository.defaultNetworks.state("dual")
+    val defaultLengthMin: StateFlow<Int> = repository.defaultLengthMin.state(10)
+    val defaultMovement: StateFlow<String> = repository.defaultMovement.state("walk")
+
+    /** Companion phones seen in imported / linked runs. */
+    val linkedDevices: StateFlow<Int> = runs.observeRuns().map { list -> CompanionDevices.from(list.map { it.run }).size }.state(0)
 
     val isDebugBuild: Boolean = 0 != (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE)
+
+    val versionName: String = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull() ?: "—"
 
     fun update(transform: (RunSettings) -> RunSettings) {
         viewModelScope.launch { repository.update(transform) }
     }
 
-    fun setSimScenario(name: String?) {
-        viewModelScope.launch { repository.setDebugSimScenario(name) }
-    }
+    fun setSimScenario(name: String?) { viewModelScope.launch { repository.setDebugSimScenario(name) } }
+    fun setThemeMode(mode: String) { viewModelScope.launch { repository.setThemeMode(mode) } }
+    fun setEngineerView(on: Boolean) { viewModelScope.launch { repository.setEngineerView(on) } }
+    fun setDefaultNetworks(v: String) { viewModelScope.launch { repository.setDefaultNetworks(v) } }
+    fun setDefaultLengthMin(v: Int) { viewModelScope.launch { repository.setDefaultLengthMin(v) } }
+    fun setDefaultMovement(v: String) { viewModelScope.launch { repository.setDefaultMovement(v) } }
 
-    fun addEndpoint(url: String, label: String): UiText? {
+    /** @return an error to show, or null when added. */
+    fun addEndpoint(url: String, label: String): String? {
         val u = url.trim()
-        if (!(u.startsWith("https://") || u.startsWith("http://"))) return UiText.Res(R.string.settings_endpoint_invalid)
+        if (!(u.startsWith("https://") || u.startsWith("http://"))) return "Enter an http(s) URL"
         val l = label.trim().ifEmpty { u }
         update { s -> if (s.endpoints.any { it.url == u }) s else s.copy(endpoints = s.endpoints + ProbeEndpoint(u, l)) }
         return null
@@ -55,18 +73,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Validates and applies thresholds JSON; returns an error to show, or null on success. */
-    fun applyThresholds(text: String): UiText? {
+    fun applyThresholds(text: String): String? {
         val obj = try {
-            Json.parseToJsonElement(text) as? JsonObject ?: return UiText.Res(R.string.settings_thresholds_not_object)
+            Json.parseToJsonElement(text) as? JsonObject ?: return "Thresholds must be a JSON object"
         } catch (e: Exception) {
-            return UiText.Res(R.string.settings_thresholds_invalid_json, listOf(e.message ?: e.javaClass.simpleName))
+            return "Invalid JSON: ${e.message ?: e.javaClass.simpleName}"
         }
         val unknown = obj.keys - DEFAULT_THRESHOLD_KEYS
-        if (unknown.isNotEmpty()) return UiText.Res(R.string.settings_thresholds_unknown_keys, listOf(unknown.sorted().joinToString()))
+        if (unknown.isNotEmpty()) return "Unknown keys: ${unknown.sorted().joinToString()}"
         val parsed = try {
             Thresholds.fromJson(obj)
         } catch (e: Exception) {
-            return UiText.Res(R.string.settings_thresholds_invalid_json, listOf(e.message ?: e.javaClass.simpleName))
+            return "Invalid JSON: ${e.message ?: e.javaClass.simpleName}"
         }
         update { it.copy(thresholds = parsed) }
         return null

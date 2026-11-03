@@ -127,7 +127,11 @@ class RunService : LifecycleService() {
         @Volatile var ctx: CollectorContext,
         /** Fixed-duration protocol of this run (auto-stop after [Protocol.durationS] of recorded time), or null. */
         val protocol: Protocol? = null,
+        /** Fixed test length of a free run (auto-stop after this much recorded time), or null. Ignored for protocol runs. */
+        val durationLimitMs: Long? = null,
     ) {
+        /** Recorded-time budget: the protocol's duration wins, else the free-run length limit. */
+        val limitMs: Long? get() = protocol?.let { it.durationS * 1_000L } ?: durationLimitMs
         /** Wi-Fi roam records; fed every sample in [onSample] under sampleLock. */
         val roams = RoamTracker(run.runId)
         /** Last waypoint seq written (per run, 1-based); seeded from the table on recovery. */
@@ -173,8 +177,9 @@ class RunService : LifecycleService() {
                 val scenario = intent?.getStringExtra(EXTRA_SCENARIO)?.takeIf { it in Scenarios.names }
                 val site = intent?.getStringExtra(EXTRA_SITE)?.trim()?.takeIf { it.isNotEmpty() }
                 val protocolId = intent?.getStringExtra(EXTRA_PROTOCOL)
+                val limitMs = intent?.getLongExtra(EXTRA_DURATION_LIMIT_MS, 0L)?.takeIf { it > 0L }
                 command {
-                    if (promoted) startLocked(name, mode, settings, scenario, site, protocolId)
+                    if (promoted) startLocked(name, mode, settings, scenario, site, protocolId, limitMs)
                     else failStartLocked(R.string.alert_start_failed)
                 }
             }
@@ -229,6 +234,7 @@ class RunService : LifecycleService() {
 
     private suspend fun startLocked(
         name: String, mode: String, userSettings: RunSettings, scenario: String?, site: String?, protocolId: String?,
+        durationLimitMs: Long? = null,
     ) {
         session?.let { s -> // already running: re-publish so the caller's PREFLIGHT state resolves
             facade.publishRunId(s.run.runId); facade.publishState(s.state); return
@@ -271,7 +277,7 @@ class RunService : LifecycleService() {
             failStartLocked(R.string.alert_start_failed)
             return
         }
-        val s = newSession(run, settings, scenario, now.tMonoNs, protocol)
+        val s = newSession(run, settings, scenario, now.tMonoNs, protocol, if (protocol == null) durationLimitMs else null)
         beginSession(s)
         launchNtp(s)
     }
@@ -312,7 +318,14 @@ class RunService : LifecycleService() {
         else now.tMonoNs - (now.tUtcMs - run.startedAt).coerceAtLeast(0) * 1_000_000L
 
         val protocol = Protocol.byId(hb.protocolId ?: run.protocol)
-        val s = newSession(run, settings, hb.scenario?.takeIf { it in Scenarios.names }, startedMono, protocol)
+        // A free run's length limit is not stored; recover it from the heartbeat's projected end
+        // (written for every limited run): recorded time at the heartbeat + time that was left.
+        val recoveredLimitMs = if (protocol == null && hb.protocolEndUtcMs > 0L && hb.lastAliveUtcMs > 0L) {
+            val pausedAtHb = hb.pausedMsTotal + if (hb.paused && hb.pausedAtUtcMs > 0L) (hb.lastAliveUtcMs - hb.pausedAtUtcMs).coerceAtLeast(0L) else 0L
+            val recordedAtHb = (hb.lastAliveUtcMs - run.startedAt - pausedAtHb).coerceAtLeast(0L)
+            (recordedAtHb + (hb.protocolEndUtcMs - hb.lastAliveUtcMs).coerceAtLeast(0L)).takeIf { it > 0L }
+        } else null
+        val s = newSession(run, settings, hb.scenario?.takeIf { it in Scenarios.names }, startedMono, protocol, recoveredLimitMs)
         s.waypointSeq = runCatching { repository.counts(run.runId)[Table.WAYPOINT]?.toInt() ?: 0 }.getOrDefault(0)
         s.pausedMsTotal = hb.pausedMsTotal
         s.gapMsTotal = hb.gapMsTotal
@@ -469,12 +482,14 @@ class RunService : LifecycleService() {
 
     // ------------------------------------------------------------------ session plumbing
 
-    private fun newSession(run: RunRecord, settings: RunSettings, scenario: String?, startedMonoNs: Long, protocol: Protocol?): Session {
+    private fun newSession(
+        run: RunRecord, settings: RunSettings, scenario: String?, startedMonoNs: Long, protocol: Protocol?, durationLimitMs: Long? = null,
+    ): Session {
         // Collectors receive the already-effective settings with batterySaver cleared, so calling
         // effective() again on their side is a no-op (never double-multiplied).
         return Session(
             run, settings, scenario, EventEngine(run.runId, settings.thresholds), startedMonoNs,
-            collectorContext(run.runId, settings), protocol,
+            collectorContext(run.runId, settings), protocol, durationLimitMs,
         )
     }
 
@@ -508,6 +523,7 @@ class RunService : LifecycleService() {
             facade.publishLive(aggregator.snapshot)
         }
         facade.publishRunId(s.run.runId)
+        facade.publishLimit(s.limitMs)
         facade.publishState(s.state)
         acquireWakeLock()
         if (s.state == RunState.RECORDING) launchSources(s)
@@ -689,7 +705,7 @@ class RunService : LifecycleService() {
         val remaining = protocolRemainingMs(s, now) ?: return
         if (remaining <= 0L && s.state == RunState.RECORDING && !s.autoStopQueued) {
             s.autoStopQueued = true
-            Log.i(TAG, "protocol ${s.protocol?.id} complete — stopping run ${s.run.runId}")
+            Log.i(TAG, "${s.protocol?.id ?: "length limit"} reached — stopping run ${s.run.runId}")
             command { if (session === s && s.state == RunState.RECORDING) stopLocked() }
         }
     }
@@ -700,10 +716,10 @@ class RunService : LifecycleService() {
         return ((now.tMonoNs - s.startedMonoNs) / 1_000_000L - pausedMs).coerceAtLeast(0L)
     }
 
-    /** Protocol time left (recorded time; pauses and restarts do not count), or null for a free run. */
+    /** Time left of the protocol / length limit (recorded time; pauses and restarts do not count), or null for an open-ended run. */
     private fun protocolRemainingMs(s: Session, now: Stamp): Long? {
-        val p = s.protocol ?: return null
-        return p.durationS * 1_000L - recordedMs(s, now)
+        val limit = s.limitMs ?: return null
+        return limit - recordedMs(s, now)
     }
 
     private fun watchdog(s: Session) {
@@ -767,7 +783,8 @@ class RunService : LifecycleService() {
     private fun updateNotification() {
         val s = session ?: return
         if (!foreground) return
-        val protocol = s.protocol?.let { p -> p.id to (protocolRemainingMs(s, clock.now()) ?: 0L).coerceAtLeast(0L) }
+        val remaining = protocolRemainingMs(s, clock.now())
+        val protocol = remaining?.let { r -> (s.protocol?.id ?: s.run.name) to r.coerceAtLeast(0L) }
         notifications.post(
             RunNotifications.ID_RUNNING,
             notifications.running(facade.live.value, paused = s.state == RunState.PAUSED, protocol = protocol),
@@ -885,6 +902,7 @@ class RunService : LifecycleService() {
         const val EXTRA_AUDIO_PATH = "audio_path"
         const val EXTRA_SITE = "site"
         const val EXTRA_PROTOCOL = "protocol_id"
+        const val EXTRA_DURATION_LIMIT_MS = "duration_limit_ms"
         const val EXTRA_LABEL = "label"
         const val EXTRA_TAP_UTC_MS = "tap_utc_ms"
         const val EXTRA_TAP_MONO_NS = "tap_mono_ns"

@@ -45,7 +45,7 @@ class ReportRepository @Inject constructor(
     /** Cached report, building it if needed. Null while the run is still recording or does not exist. */
     suspend fun report(runId: String, force: Boolean = false): TestReport? = lock(runId).withLock {
         withContext(Dispatchers.IO) {
-            val run = runs.getRun(runId) ?: return@withContext null
+            val run = runs.getRun(runId)?.takeIf { it.endedAt != null } ?: return@withContext null
             val key = cacheKey(run)
             if (!force) {
                 synchronized(mem) { mem[runId] }?.takeIf { it.startedAt == run.startedAt && cachedKey[runId] == key }?.let { return@withContext it }
