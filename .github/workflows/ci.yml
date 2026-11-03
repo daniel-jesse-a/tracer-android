@@ -1,21 +1,53 @@
-name: CI
-on: [push, pull_request]
+name: Android build
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  jvm-core:
+  apk:
+    name: Debug APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew :core:test :events:test
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew assembleDebug test lint
-      - uses: actions/upload-artifact@v4
+      - name: Assemble debug APK
+        run: ./gradlew --no-configuration-cache --stacktrace --continue :app:assembleDebug 2>&1 | tee build-log.txt; exit ${PIPESTATUS[0]}
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: build-log, path: build-log.txt }
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with: { name: tracer-debug-apk, path: app/build/outputs/apk/debug/*.apk }
+
+  checks:
+    name: Unit tests + lint
+    runs-on: ubuntu-latest
+    needs: apk
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew --no-configuration-cache --continue testDebugUnitTest :core:test :events:test 2>&1 | tee test-log.txt; exit ${PIPESTATUS[0]}
+      - name: Lint
+        if: always()
+        run: ./gradlew --no-configuration-cache --continue lintDebug 2>&1 | tee lint-log.txt; exit ${PIPESTATUS[0]}
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-reports
+          path: |
+            test-log.txt
+            lint-log.txt
+            **/build/reports/**
