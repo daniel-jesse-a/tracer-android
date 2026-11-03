@@ -44,6 +44,7 @@ class ThroughputProbeCollector @Inject constructor(
         }
 
         var lastRunMs = Long.MIN_VALUE / 2
+        var cycle = 0
         var nextDueMs = ctx.clock.now().tMonoMs // first run at start
         while (isActive) {
             val waitMs = nextDueMs - ctx.clock.now().tMonoMs
@@ -61,7 +62,8 @@ class ThroughputProbeCollector @Inject constructor(
             val sample = runOnce(ctx, default)
             send(sample)
             ctx.status.sample(id, sample.stamp.tMonoNs)
-            if (ctx.settings.dualPathProbing && default?.isCellular != true) {
+            cycle++
+            if (ctx.settings.dualPathProbing && default?.isCellular != true && cycle % PARALLEL_CELLULAR_EVERY == 0) {
                 networks.cellularIfNotDefault()?.let { send(runOnce(ctx, it)) }
             }
         }
@@ -112,5 +114,7 @@ class ThroughputProbeCollector @Inject constructor(
         const val DEBOUNCE_MS = 5_000L
         const val MIN_SPACING_MS = 20_000L
         const val TRANSFER_TIMEOUT_MS = 30_000L
+        /** Parallel mobile-data throughput (while on Wi-Fi) only every Nth cycle, to bound data use. */
+        const val PARALLEL_CELLULAR_EVERY = 3
     }
 }

@@ -111,8 +111,10 @@ data class RunSettings(
     val adaptiveLatency: Boolean = true,
     val throughputIntervalMs: Long = 120_000,
     /** Upper bound per test; the download also stops after [throughputMaxMs]. 1 MB never leaves TCP slow start. */
-    val throughputBytes: Long = 25_000_000,
-    val throughputMaxMs: Long = 5_000,
+    // Data budget: default path ≤ 10 MB / 2 min (≤ 300 MB/h worst case); the parallel cellular path
+    // (dual-path, while on Wi-Fi) runs every 3rd cycle (≤ 100 MB/h). Latency probes are a few kB.
+    val throughputBytes: Long = 10_000_000,
+    val throughputMaxMs: Long = 4_000,
     /** Also probe the mobile-data network while Wi-Fi is the default (uses a little mobile data). */
     val dualPathProbing: Boolean = true,
     val publicIpIntervalMs: Long = 300_000,
