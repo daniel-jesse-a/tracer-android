@@ -51,7 +51,22 @@ interface Collector {
     fun samples(ctx: CollectorContext): Flow<Sample>
 }
 
-enum class CollectorHealth { OK, DEGRADED, UNAVAILABLE, STOPPED }
+/** DISABLED = switched off by the user in Tracer settings: expected, never shown as a problem. */
+enum class CollectorHealth { OK, DEGRADED, UNAVAILABLE, STOPPED, DISABLED }
+
+/** Where a banner's "Fix" button should take the user. null = nothing the user can do (hardware/OS limit). */
+enum class FixAction {
+    /** Android › Apps › Tracer › Permissions */
+    APP_PERMISSIONS,
+    /** Android Location settings */
+    LOCATION_SETTINGS,
+    /** Android Wi-Fi settings */
+    WIFI_SETTINGS,
+    /** Developer options (Wi-Fi scan throttling) */
+    DEVELOPER_OPTIONS,
+    /** Tracer's own settings screen */
+    TRACER_SETTINGS,
+}
 
 data class CollectorStatus(
     val id: String,
@@ -61,6 +76,7 @@ data class CollectorStatus(
     /** user-facing banner text, e.g. "Wi-Fi scans throttled — turn off Developer options › Wi-Fi scan throttling" */
     val message: String? = null,
     val restarts: Int = 0,
+    val fix: FixAction? = null,
 )
 
 /** Shared health board; collectors report, UI shows banners, watchdog reads. */
@@ -72,9 +88,11 @@ class CollectorStatusBoard {
         _state.update { m -> m + (id to f(m[id] ?: CollectorStatus(id))) }
 
     fun sample(id: String, monoNs: Long) = update(id) { it.copy(health = if (it.health == CollectorHealth.DEGRADED) it.health else CollectorHealth.OK, lastSampleMonoNs = monoNs, samples = it.samples + 1) }
-    fun degraded(id: String, message: String) = update(id) { it.copy(health = CollectorHealth.DEGRADED, message = message) }
-    fun unavailable(id: String, message: String) = update(id) { it.copy(health = CollectorHealth.UNAVAILABLE, message = message) }
-    fun ok(id: String) = update(id) { it.copy(health = CollectorHealth.OK, message = null) }
+    fun degraded(id: String, message: String, fix: FixAction? = null) = update(id) { it.copy(health = CollectorHealth.DEGRADED, message = message, fix = fix) }
+    fun unavailable(id: String, message: String, fix: FixAction? = null) = update(id) { it.copy(health = CollectorHealth.UNAVAILABLE, message = message, fix = fix) }
+    /** The user turned this collector off in Tracer settings — informational only. */
+    fun disabled(id: String, message: String) = update(id) { it.copy(health = CollectorHealth.DISABLED, message = message, fix = null) }
+    fun ok(id: String) = update(id) { it.copy(health = CollectorHealth.OK, message = null, fix = null) }
     fun reset() { _state.value = emptyMap() }
 }
 

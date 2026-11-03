@@ -10,6 +10,7 @@ import app.tracer.core.model.LocationSample
 import app.tracer.core.model.Sample
 import app.tracer.core.model.Stamp
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -39,7 +40,7 @@ class LocationCollector @Inject constructor(
     @SuppressLint("MissingPermission")
     override fun samples(ctx: CollectorContext): Flow<Sample> = callbackFlow<Sample> {
         if (!context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            ctx.status.unavailable(id, "Precise location permission is required for GPS logging.")
+            ctx.status.unavailable(id, "Precise location permission is required for GPS logging.", FixAction.APP_PERMISSIONS)
             awaitClose { }
             return@callbackFlow
         }
@@ -50,7 +51,7 @@ class LocationCollector @Inject constructor(
             return@callbackFlow
         }
         if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            ctx.status.degraded(id, "Location is turned off. Enable Location to record GPS fixes.")
+            ctx.status.degraded(id, "Location is turned off. Enable Location to record GPS fixes.", FixAction.LOCATION_SETTINGS)
         }
 
         val settings = ctx.settings.effective()
@@ -66,7 +67,7 @@ class LocationCollector @Inject constructor(
             override fun onProviderEnabled(provider: String) = ctx.status.ok(id)
 
             override fun onProviderDisabled(provider: String) =
-                ctx.status.degraded(id, "Location is turned off. Enable Location to record GPS fixes.")
+                ctx.status.degraded(id, "Location is turned off. Enable Location to record GPS fixes.", FixAction.LOCATION_SETTINGS)
         }
         val request = PlatformLocationRequest.Builder(interval)
             .setQuality(PlatformLocationRequest.QUALITY_HIGH_ACCURACY)

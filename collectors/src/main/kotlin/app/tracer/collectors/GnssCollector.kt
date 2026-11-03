@@ -16,6 +16,7 @@ import app.tracer.core.model.GnssRawSample
 import app.tracer.core.model.GnssSatelliteSample
 import app.tracer.core.model.Sample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
@@ -43,7 +44,7 @@ class GnssCollector @Inject constructor(
     @SuppressLint("MissingPermission")
     override fun samples(ctx: CollectorContext): Flow<Sample> = callbackFlow<Sample> {
         if (!context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            ctx.status.unavailable(id, "Precise location permission is required for satellite logging.")
+            ctx.status.unavailable(id, "Precise location permission is required for satellite logging.", FixAction.APP_PERMISSIONS)
             awaitClose { }
             return@callbackFlow
         }
@@ -81,7 +82,7 @@ class GnssCollector @Inject constructor(
             }
 
             override fun onStopped() {
-                ctx.status.degraded(id, "GNSS engine stopped (location turned off?).")
+                ctx.status.degraded(id, "GNSS engine stopped (location turned off?).", FixAction.LOCATION_SETTINGS)
             }
 
             override fun onStarted() {
@@ -119,7 +120,7 @@ class GnssCollector @Inject constructor(
                     override fun onStatusChanged(status: Int) {
                         when (status) {
                             GnssMeasurementsEvent.Callback.STATUS_NOT_SUPPORTED -> ctx.status.degraded(id, "Raw GNSS measurements are not supported on this device.")
-                            GnssMeasurementsEvent.Callback.STATUS_LOCATION_DISABLED -> ctx.status.degraded(id, "Location is turned off; raw GNSS paused.")
+                            GnssMeasurementsEvent.Callback.STATUS_LOCATION_DISABLED -> ctx.status.degraded(id, "Location is turned off; raw GNSS paused.", FixAction.LOCATION_SETTINGS)
                             GnssMeasurementsEvent.Callback.STATUS_NOT_ALLOWED -> ctx.status.degraded(id, "Raw GNSS measurements are not allowed for this app.")
                         }
                     }

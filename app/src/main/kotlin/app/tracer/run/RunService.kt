@@ -540,7 +540,7 @@ class RunService : LifecycleService() {
                 last[id] = now
                 val changedHealth = prev == null || prev.first != st.health || prev.second != st.message
                 val restarted = prev != null && st.restarts > prev.third
-                if (prev == null && st.health == CollectorHealth.OK) continue // normal start, not news
+                if (prev == null && (st.health == CollectorHealth.OK || st.health == CollectorHealth.DISABLED)) continue // normal start / user-disabled, not news
                 if (!changedHealth && !restarted) continue
                 val text = buildString {
                     append("collector:").append(id).append(' ').append(st.health.name.lowercase())

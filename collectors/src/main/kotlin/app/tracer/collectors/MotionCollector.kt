@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import app.tracer.core.model.MotionSample
 import app.tracer.core.model.Sample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
@@ -96,7 +97,7 @@ class MotionCollector @Inject constructor(
         var pendingIntent: PendingIntent? = null
         var receiver: BroadcastReceiver? = null
         if (!context.hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) {
-            ctx.status.degraded(id, "Physical activity permission is missing; logging sensors only.")
+            ctx.status.degraded(id, "Physical activity permission is missing; logging sensors only.", FixAction.APP_PERMISSIONS)
         } else {
             val action = "${context.packageName}.TRACER_ACTIVITY_TRANSITION"
             val r = object : BroadcastReceiver() {

@@ -15,6 +15,7 @@ import app.tracer.core.cell.CellNormalizer
 import app.tracer.core.model.RadioSample
 import app.tracer.core.model.Sample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.SendChannel
@@ -46,7 +47,7 @@ class CellularCollector @Inject constructor(
     @SuppressLint("MissingPermission")
     override fun samples(ctx: CollectorContext): Flow<Sample> = callbackFlow<Sample> {
         if (!context.hasAllPermissions(Manifest.permission.READ_PHONE_STATE, Manifest.permission.ACCESS_FINE_LOCATION)) {
-            ctx.status.unavailable(id, "Phone and precise location permissions are required for cell logging.")
+            ctx.status.unavailable(id, "Phone and precise location permissions are required for cell logging.", FixAction.APP_PERMISSIONS)
             awaitClose { }
             return@callbackFlow
         }

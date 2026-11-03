@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import app.tracer.core.model.Sample
 import app.tracer.core.model.WifiScanSample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import app.tracer.core.util.WifiMath
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -45,7 +46,7 @@ class WifiScanCollector @Inject constructor(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
         if (!context.hasAllPermissions(*needed.toTypedArray())) {
-            ctx.status.unavailable(id, "Nearby Wi-Fi devices and precise location permissions are required for Wi-Fi scans.")
+            ctx.status.unavailable(id, "Nearby Wi-Fi devices and precise location permissions are required for Wi-Fi scans.", FixAction.APP_PERMISSIONS)
             awaitClose { }
             return@callbackFlow
         }
@@ -63,7 +64,7 @@ class WifiScanCollector @Inject constructor(
         fun onFailure() {
             if (failures.incrementAndGet() >= 2) {
                 scanCache.throttled = true
-                ctx.status.degraded(id, THROTTLED_MESSAGE)
+                ctx.status.degraded(id, THROTTLED_MESSAGE, FixAction.DEVELOPER_OPTIONS)
             }
         }
 

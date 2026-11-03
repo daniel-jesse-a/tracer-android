@@ -14,6 +14,7 @@ import android.os.Build
 import app.tracer.core.model.Sample
 import app.tracer.core.model.WifiRttSample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
@@ -40,7 +41,7 @@ class WifiRttCollector @Inject constructor(
     override fun samples(ctx: CollectorContext): Flow<Sample> = callbackFlow<Sample> {
         val settings = ctx.settings.effective()
         if (!settings.wifiRttEnabled) {
-            ctx.status.unavailable(id, "Wi-Fi RTT is turned off in settings.")
+            ctx.status.disabled(id, "Wi-Fi RTT is turned off in settings.")
             awaitClose { }
             return@callbackFlow
         }
@@ -55,7 +56,7 @@ class WifiRttCollector @Inject constructor(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
         if (!context.hasAllPermissions(*needed.toTypedArray())) {
-            ctx.status.unavailable(id, "Nearby Wi-Fi devices and precise location permissions are required for Wi-Fi RTT.")
+            ctx.status.unavailable(id, "Nearby Wi-Fi devices and precise location permissions are required for Wi-Fi RTT.", FixAction.APP_PERMISSIONS)
             awaitClose { }
             return@callbackFlow
         }
@@ -93,7 +94,7 @@ class WifiRttCollector @Inject constructor(
             while (isActive) {
                 ctx.signals.awaitResumed()
                 if (!rtt.isAvailable) {
-                    ctx.status.degraded(id, "Wi-Fi RTT is temporarily unavailable (Wi-Fi or Location off).")
+                    ctx.status.degraded(id, "Wi-Fi RTT is temporarily unavailable (Wi-Fi or Location off).", FixAction.LOCATION_SETTINGS)
                 } else {
                     val candidates = candidates(wifi)
                     if (candidates.isNotEmpty()) {

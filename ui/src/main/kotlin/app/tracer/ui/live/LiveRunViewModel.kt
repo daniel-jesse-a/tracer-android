@@ -114,7 +114,11 @@ class LiveRunViewModel @Inject constructor(
 
     /** Collector problems worth a banner (throttled scans, missing permission, …). */
     val banners: StateFlow<List<CollectorStatus>> = statusBoard.state
-        .map { m -> m.values.filter { it.message != null && it.health != CollectorHealth.OK }.sortedBy { it.id } }
+        .map { m ->
+            m.values.filter {
+                it.message != null && it.health != CollectorHealth.OK && it.health != CollectorHealth.DISABLED
+            }.sortedBy { it.id }
+        }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

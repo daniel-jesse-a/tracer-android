@@ -15,6 +15,7 @@ import app.tracer.core.model.Sample
 import app.tracer.core.model.WifiConnectionSample
 import app.tracer.core.model.WifiLinkSample
 import app.tracer.core.runtime.Collector
+import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import app.tracer.core.util.WifiMath
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -48,7 +49,7 @@ class WifiCollector @Inject constructor(
         }
         val hasLocation = context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
         if (!hasLocation) {
-            ctx.status.degraded(id, "Precise location permission is needed to read the Wi-Fi network name and BSSID.")
+            ctx.status.degraded(id, "Precise location permission is needed to read the Wi-Fi network name and BSSID.", FixAction.APP_PERMISSIONS)
         }
         val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
         val worker = Worker(id)

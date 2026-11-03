@@ -1,5 +1,12 @@
 package app.tracer.ui.live
 
+import app.tracer.core.runtime.FixAction
+import androidx.compose.ui.platform.LocalContext
+import android.provider.Settings
+import android.net.Uri
+import android.content.Intent
+import android.content.Context
+import android.content.ActivityNotFoundException
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -275,8 +282,12 @@ private fun CollectorBanner(status: CollectorStatus, onOpenSettings: () -> Unit)
                 Text(status.id, style = Mono.tiny, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(status.message.orEmpty(), style = MaterialTheme.typography.bodySmall)
             }
-            if (status.health == CollectorHealth.UNAVAILABLE) {
-                TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.live_fix)) }
+            // Only offer "Fix" when there is something the user can change, and send them to the
+            // place that changes it (Android permissions / Location / Developer options — not Tracer settings).
+            val fix = status.fix
+            if (fix != null) {
+                val context = LocalContext.current
+                TextButton(onClick = { openFix(context, fix, onOpenSettings) }) { Text(stringResource(R.string.live_fix)) }
             }
         }
     }
@@ -298,4 +309,23 @@ private fun MarkMomentDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit
         confirmButton = { Button(onClick = { onConfirm(note) }) { Text(stringResource(R.string.live_mark_confirm)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.live_cancel)) } },
     )
+}
+
+private fun openFix(context: Context, fix: FixAction, onOpenSettings: () -> Unit) {
+    val intent = when (fix) {
+        FixAction.APP_PERMISSIONS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+        FixAction.LOCATION_SETTINGS -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        FixAction.WIFI_SETTINGS -> Intent(Settings.ACTION_WIFI_SETTINGS)
+        FixAction.DEVELOPER_OPTIONS -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+        FixAction.TRACER_SETTINGS -> { onOpenSettings(); return }
+    }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        // Developer options hidden / OEM without the screen: fall back to the app's system page.
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
 }
