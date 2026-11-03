@@ -1,0 +1,70 @@
+flowchart LR
+  subgraph Device["Android OS APIs"]
+    LM[LocationManager / Fused]
+    GN[GnssStatus / Measurements]
+    TM["TelephonyManager ×SIM<br/>TelephonyCallback + requestCellInfoUpdate"]
+    WM[WifiManager scans / RTT]
+    CM[ConnectivityManager<br/>NetworkCallbacks]
+    SN[Sensors + Activity Recognition]
+    PM[Battery / PowerManager / Thermal]
+  end
+
+  subgraph collectors[":collectors"]
+    C1[location] & C2[gnss] & C3[cellular] & C4[wifi · wifi_scan · wifi_rtt] & C5[network_path] & C6[motion] & C7[device]
+  end
+  subgraph probes[":probes"]
+    P1[latency HEAD<br/>OkHttp EventListener] & P2[throughput] & P3[public IP / ASN] & P4[captive] & P5[SNTP] & P6[OpenCelliD lookup]
+  end
+
+  LM --> C1
+  GN --> C2
+  TM --> C3
+  WM --> C4
+  CM --> C5
+  SN --> C6
+  PM --> C7
+
+  subgraph app[":app — RunService (foreground, type=location)"]
+    MERGE(["merge Flow&lt;Sample&gt;<br/>supervised · watchdog · backoff"])
+    ENG["EventEngine + CauseEngine<br/>(:events, pure Kotlin)"]
+    AGG["LiveAggregator → LiveSnapshot<br/>(:core)"]
+    NOTIF[Persistent notification]
+  end
+
+  C1 & C2 & C3 & C4 & C5 & C6 & C7 --> MERGE
+  P1 & P2 & P3 & P4 --> MERGE
+  MERGE --> ENG
+  MERGE --> W
+  ENG -- EventSample --> W
+  MERGE --> AGG
+  ENG --> AGG
+  AGG --> NOTIF
+  AGG -- RunSignals --> probes
+
+  subgraph storage[":storage"]
+    W["BatchingSampleWriter<br/>single writer · 1 s / 200 rows"]
+    DB[("Room + canonical DDL<br/>SQLite WAL")]
+    REPO[RunRepository]
+  end
+  W --> DB --> REPO
+
+  subgraph ui[":ui — Compose M3"]
+    LIVE[Live Run + Cells/Wi-Fi/GNSS panels]
+    LIB[Library] 
+    REP[Replay · Event detail · Worst segments]
+    PRE[Onboarding · Pre-flight · Settings]
+  end
+  AGG --> LIVE
+  REPO --> LIB & REP
+  P6 --> LIVE
+
+  subgraph export[":export"]
+    BX["Bundle ZIP<br/>run.sqlite · CSV/table · GeoJSON · run.json SHA-256"]
+  end
+  subgraph pairing[":pairing"]
+    QR[QR payload · CameraX/ML Kit] --> ALIGN[GPS-time alignment]
+  end
+  REPO --> BX
+  BX -- Sharesheet / HTTPS --> OUT((Analysis))
+  IOS[[iPhone Tracer bundle]] -- import --> BX --> REPO
+  ALIGN --> REP

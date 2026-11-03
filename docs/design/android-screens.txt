@@ -1,0 +1,219 @@
+Android · light mode
+M3 light tonal scheme from the same seed · data hues darkened
+Pre-flight
+8/8 READY
+Permissions
+7/7 · all the time
+GPS lock
+±2.9 m · 31 sats
+Battery
+71 % · unrestricted
+Storage
+88.4 GB free
+Probe endpoints
+3/3 · 16 ms
+iPhone 17 Pro
+Δt −12 ms · GPS
+Cell info API
+1 Hz · 2 SIM slots
+Wi-Fi throttling
+off · raw GNSS ✓
+Run setup
+Run name
+Walk
+Car
+✓ Train
+Custom
+Sampling
+1 Hz
+Probes
+every 5 s
+Wi-Fi scan
+every 2 s
+Link to iPhone run
+iPhone 17 Pro · Δt −12 ms
+Start run
+Pre-flight
+Runs
+Companion
+Settings
+PCI 214
+TA 12 · 937 m
+00:42:17
+Train · 61.4 km
+Live
+Cells
+Wi-Fi
+GNSS
+TYPE
+5G NSA
+e& 424-02
+RSRP
+−94 dBm
+good
+RSRQ
+−11 dB
+NR −10
+SINR
+8.5 dB
+NR 11.2
+PCI · CID
+214
+0x1A3F0C2
+BAND
+n78+B3
+ARFCN 1850
+TAC · TA
+4108
+TA 12 · 937 m
+LATENCY
+49 ms
+p95 121
+LOSS
+0.2 %
+jit 4.8
+THRU ↓
+61.3 Mb/s
+22 s ago
+GPS · SPD
+±3 m
+96 km/h
+WI-FI
+−71 dBm
+scan · 14 APs
+Handover PCI 87 → 214
+RSRP −109 → −94 · A3 · 38 ms gap
+14:32:11.072
+Reconnect · 5G NSA
+n78 + B3 anchor · out of tunnel
+14:31:23.540
+Drop · no service
+41.3 s · last PCI 87 · RSRP −121
+14:30:42.250
+End run
+00:42:31
+SIM 1 · e& 424-02 · 1 Hz
+Live
+Cells
+Wi-Fi
+GNSS
+Serving · LTE anchor
+PCI 214
+RSRP
+−94
+dBm
+RSRQ
+−11
+dB
+SINR
+8.5
+dB
+B3
+1850
+CID
+0x1A3F0C2
+TAC
+4108
+TA 12
+937 m
+NR leg · n78 · 636666
+PCI 402 · SS-RSRP −97 · SINR 11.2
+Neighbours · 7
+sorted by RSRP
+PCI 87
+B3 · 1850
+RSRQ -10
+-92
+▲ Overtaking serving by +2 dB for 1.4 s · HO likely
+PCI 311
+B3 · 1850
+RSRQ -13
+-99
+PCI 405
+n78 · 636666
+RSRQ -12
+-101
+PCI 56
+B20 · 6300
+RSRQ -14
+-104
+PCI 129
+B1 · 300
+RSRQ -15
+-107
+PCI 88
+B3 · 1850
+RSRQ -17
+-112
+PCI 17
+B20 · 6300
+RSRQ -19
+-118
+2 selected · 44.1 MB
+All · 52
+Train
+Linked
+This week
+Has drops
+Rail · Seg 07 · Coach 4
+Today 13:55
+TRAIN
+1:07:42
+98.6 km
+41 ev
+⇄ iPhone
+GPS ✓
+NET ✓
+PRB ✓
+RF ✓
+GNSS ✓
+Rail · Seg 06 · Coach 4
+Today 11:20
+TRAIN
+0:58:10
+84.1 km
+33 ev
+⇄ iPhone
+GPS ✓
+NET ✓
+PRB ✓
+RF ✓
+GNSS ✓
+Depot yard · RF sweep
+Mon 2 Nov
+WALK
+0:22:30
+1.8 km
+12 ev
+GPS ✓
+NET ✓
+PRB ✓
+RF ✓
+GNSS ✓
+Marina walk · indoor/outdoor
+Sun 1 Nov
+WALK
+0:32:48
+2.7 km
+26 ev
+⇄ iPhone
+GPS ✓
+NET ✓
+PRB ✓
+RF ✓
+GNSS ✓
+Static · rooftop 30 min
+Sat 31 Oct
+CUSTOM
+0:30:00
+0.0 km
+3 ev
+GPS ✓
+NET ✓
+PRB ✕
+RF ✓
+GNSS ✓
+Pre-flight
+Runs
+Companion
+Settings
