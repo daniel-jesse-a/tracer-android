@@ -32,6 +32,16 @@ android {
         buildConfigField("String", "MAPLIBRE_STYLE_URL", "\"https://tiles.openfreemap.org/styles/liberty\"")
     }
 
+    signingConfigs {
+        // Fixed debug key (committed on purpose; debug-only) so CI-built APKs install over each other.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -39,6 +49,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
+            signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }

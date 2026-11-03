@@ -11,3 +11,4 @@
 *.apk
 *.aab
 *.keystore
+!app/debug.keystore
