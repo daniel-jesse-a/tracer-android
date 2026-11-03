@@ -34,8 +34,10 @@ data class Manifest(
 )
 
 object Bundle {
-    const val BUNDLE_VERSION = 1
+    /** v2: lean (non-empty tables only), t_run_s/t_local CSV columns, summary.json, time zone + method fingerprint in run.json */
+    const val BUNDLE_VERSION = 2
     const val MANIFEST = "run.json"
+    const val SUMMARY = "summary.json"
 
     fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
@@ -49,12 +51,27 @@ object Bundle {
     }
 
     /**
-     * Writes the ZIP: run.sqlite, <table>.csv for every table, track.geojson, events.geojson, run.json.
+     * Writes the ZIP (bundle v2): run.sqlite, `<table>.csv` for every table **that has rows** (iOS-only
+     * tables are never written on Android), track.geojson, events.geojson, summary.json and run.json.
+     * Every sample CSV gets two extra trailing columns: `t_run_s` (seconds since run start, monotonic)
+     * and `t_local` (ISO-8601 local time in [Manifest] time zone). One streaming pass: rows are
+     * written and folded into the summary without holding whole tables (multi-hour runs).
      * Files are staged in [workDir] so each SHA-256 is computed over exactly the bytes that are zipped.
      */
-    fun write(source: BundleSource, out: OutputStream, workDir: File, generator: String, nowUtcMs: Long = System.currentTimeMillis()): Manifest {
+    fun write(
+        source: BundleSource, out: OutputStream, workDir: File, generator: String,
+        nowUtcMs: Long = System.currentTimeMillis(), platform: String = source.run.devicePlatform,
+    ): Manifest {
         workDir.mkdirs()
+        val run = source.run
         val staged = mutableListOf<Pair<File, Long?>>()
+        val omitted = mutableListOf<String>()
+        val zone = run.timeZone?.let { runCatching { java.time.ZoneId.of(it) }.getOrNull() } ?: java.time.ZoneOffset.UTC
+        val localFmt = java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        val startMono = run.tMonoNs
+        // as recorded (no migration): the fingerprint must describe what this run actually did
+        val settings = run.settingsJson?.let { runCatching { app.tracer.core.config.RunSettings.fromJson(it, migrate = false) }.getOrNull() }
+        val summary = app.tracer.core.analysis.SummaryBuilder(run)
 
         source.sqliteFile()?.let { db ->
             val f = File(workDir, "run.sqlite")
@@ -67,39 +84,52 @@ object Bundle {
         val serving = mutableListOf<CellSample>()
         val events = mutableListOf<EventSample>()
 
-        // runs.csv
         File(workDir, "runs.csv").also { f ->
-            f.bufferedWriter().use { w -> Csv.writeRow(w, Schema.RUNS.exportColumns); Csv.writeRow(w, SampleCodec.encodeRun(source.run)) }
+            f.bufferedWriter().use { w -> Csv.writeRow(w, Schema.RUNS.exportColumns); Csv.writeRow(w, SampleCodec.encodeRun(run)) }
             staged += f to 1L
         }
 
         for (td in Schema.sampleTables) {
+            if (td.table.iosOnly && platform != "ios") { omitted += td.name; continue }
             val f = File(workDir, "${td.name}.csv")
             var n = 0L
             f.bufferedWriter().use { w ->
-                Csv.writeRow(w, td.exportColumns)
+                Csv.writeRow(w, td.exportColumns + listOf("t_run_s", "t_local"))
                 for (row in source.rows(td)) {
-                    Csv.writeRow(w, row); n++
-                    if (td.table == Table.LOCATION || td.table == Table.CELL_SERVING || td.table == Table.EVENT) {
-                        val m = td.exportColumns.zip(row).toMap()
-                        when (val s = SampleCodec.decode(td.table, SampleCodec.MapRow(m))) {
-                            is LocationSample -> locs += s
-                            is CellSample -> serving += s
-                            is EventSample -> events += s
+                    val m = td.exportColumns.zip(row).toMap()
+                    val sample = runCatching { SampleCodec.decode(td.table, SampleCodec.MapRow(m)) }.getOrNull()
+                    val utc = (m["t_utc_ms"] as? Number)?.toLong()
+                    val mono = (m["t_mono_ns"] as? Number)?.toLong()
+                    val tRun = if (mono != null && startMono > 0) Math.round((mono - startMono) / 1e6) / 1000.0 else null
+                    val tLocal = utc?.let { java.time.Instant.ofEpochMilli(it).atZone(zone).format(localFmt) }
+                    Csv.writeRow(w, row + listOf(tRun, tLocal)); n++
+                    if (sample != null) {
+                        summary.add(sample)
+                        when (sample) {
+                            is LocationSample -> locs += sample
+                            is CellSample -> if (sample.serving) serving += sample
+                            is EventSample -> events += sample
                             else -> {}
                         }
                     }
                 }
             }
-            staged += f to n
+            if (n == 0L) { f.delete(); omitted += td.name } else staged += f to n
         }
 
-        File(workDir, "track.geojson").also { it.writeText(GeoJson.track(source.run.runId, locs, serving).toString()); staged += it to null }
-        File(workDir, "events.geojson").also { it.writeText(GeoJson.events(source.run.runId, events).toString()); staged += it to null }
+        File(workDir, "track.geojson").also { it.writeText(GeoJson.track(run.runId, locs, serving).toString()); staged += it to null }
+        File(workDir, "events.geojson").also { it.writeText(GeoJson.events(run.runId, events).toString()); staged += it to null }
+        val summaryJson = summary.build(settings)
+        File(workDir, SUMMARY).also { it.writeText(prettyJson.encodeToString(JsonElement.serializer(), summaryJson)); staged += it to null }
 
         val files = staged.map { (f, rows) -> BundleFile(f.name, f.length(), sha256Hex(f), rows) }
         val fingerprint = sha256Hex(Schema.sharedFingerprint().toByteArray())
-        val manifestJson = manifestJson(source.run, files, generator, nowUtcMs, fingerprint)
+        val manifestJson = JsonObject(manifestJson(run, files, generator, nowUtcMs, fingerprint) + buildJsonObject {
+            put("time_zone", zone.id)
+            put("method_fingerprint", summaryJson["method_fingerprint"] ?: JsonNull)
+            putJsonArray("tables_omitted") { omitted.forEach { add(it) } }
+            putJsonArray("csv_extra_columns") { add("t_run_s"); add("t_local") }
+        })
         val manifestFile = File(workDir, MANIFEST).also { it.writeText(manifestJson.toString()) }
 
         ZipOutputStream(BufferedOutputStream(out)).use { zip ->
@@ -109,8 +139,10 @@ object Bundle {
                 zip.closeEntry()
             }
         }
-        return Manifest(Schema.VERSION, BUNDLE_VERSION, generator, nowUtcMs, source.run, files, fingerprint, manifestJson)
+        return Manifest(Schema.VERSION, BUNDLE_VERSION, generator, nowUtcMs, run, files, fingerprint, manifestJson)
     }
+
+    private val prettyJson = Json { prettyPrint = true }
 
     private fun parseOrString(s: String?): JsonElement =
         if (s == null) JsonNull else runCatching { Json.parseToJsonElement(s) }.getOrElse { JsonPrimitive(s) }
@@ -124,6 +156,7 @@ object Bundle {
         putJsonObject("run") {
             put("run_id", run.runId); put("name", run.name); put("mode", run.mode)
             put("started_at", run.startedAt); put("ended_at", run.endedAt); put("linked_run_id", run.linkedRunId)
+            put("site", run.site); put("test_number", run.testNumber); put("protocol", run.protocol)
         }
         putJsonObject("device") {
             put("platform", run.devicePlatform); put("model", run.deviceModel)

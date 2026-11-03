@@ -44,11 +44,15 @@ class ExportIntegrityTest {
         val work = Files.createTempDirectory("bundle").toFile()
         val manifest = Bundle.write(MemSource(run("run-a"), samples), out, work, "tracer-android/1.0.0", 1_760_000_200_000)
 
-        // every table has a CSV, plus geojson + manifest
+        // lean bundle: CSVs only for tables with rows; never iOS-only tables; summary + geojson + manifest
         val names = mutableSetOf<String>()
         ZipInputStream(ByteArrayInputStream(out.toByteArray())).use { z -> while (true) { val e = z.nextEntry ?: break; names += e.name } }
-        Schema.all.forEach { assertTrue("${it.name}.csv", "${it.name}.csv" in names) }
-        assertTrue(names.containsAll(listOf("track.geojson", "events.geojson", "run.json")))
+        val present = samples.map { it.table }.toSet()
+        Schema.sampleTables.forEach { td -> assertEquals(td.name, td.table in present, "${td.name}.csv" in names) }
+        assertFalse("metrickit_payload.csv" in names)
+        assertTrue(names.containsAll(listOf("runs.csv", "track.geojson", "events.geojson", "run.json", "summary.json")))
+        val locCsv = String(work.resolve("location.csv").readBytes()).lineSequence().first()
+        assertTrue(locCsv, locCsv.endsWith("t_run_s,t_local"))
         assertEquals(manifest.files.map { it.path }.toSet() + "run.json", names)
         assertEquals(samples.count { it is LocationSample }.toLong(), manifest.files.first { it.path == "location.csv" }.rows)
 
@@ -63,7 +67,7 @@ class ExportIntegrityTest {
         val track = Json.parseToJsonElement(String(work.resolve("track.geojson").readBytes())).jsonObject
         val coords = track["features"]!!.jsonArray[0].jsonObject["geometry"]!!.jsonObject["coordinates"]!!.jsonArray
         assertEquals(samples.count { it is LocationSample }, coords.size)
-        assertEquals(1, imported.manifest["schema_version"]!!.jsonPrimitive.int)
+        assertEquals(Schema.VERSION, imported.manifest["schema_version"]!!.jsonPrimitive.int)
     }
 
     @Test fun tamperedFileIsDetected() {

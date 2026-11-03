@@ -41,7 +41,12 @@ data class TableDef(val table: Table, val columns: List<Column>, val hasRowId: B
  * and positional INSERTs follow it.
  */
 object Schema {
-    const val VERSION = 1
+    /**
+     * v2 (additive): runs.site/test_number/protocol/time_zone/method_fingerprint; probe.http_status/
+     * redirect_count/final_url/expected_response; wifi_scan.features; tables waypoint, wifi_roam,
+     * x_android_carrier, x_collector_log; x_android_network.ifname. v1 bundles still import.
+     */
+    const val VERSION = 2
 
     private fun i(n: String, nn: Boolean = false) = Column(n, ColType.INTEGER, nn)
     private fun r(n: String, nn: Boolean = false) = Column(n, ColType.REAL, nn)
@@ -65,6 +70,7 @@ object Schema {
             t("os_version", true), t("app_version", true), i("started_at", true), i("ended_at"),
             t("linked_run_id"), t("settings_json"), i("gps_offset_ms_start"), i("gps_offset_ms_end"),
             i("ntp_offset_ms"), t("completeness_json"),
+            t("site"), i("test_number"), t("protocol"), t("time_zone"), t("method_fingerprint"),
         ),
         hasRowId = false,
     )
@@ -87,7 +93,7 @@ object Schema {
     val CELL_NEIGHBOUR = def(Table.CELL_NEIGHBOUR, *cellCols)
     val WIFI_SCAN = def(
         Table.WIFI_SCAN, i("scan_id", true), t("ssid"), t("bssid", true), i("rssi_dbm", true), i("frequency_mhz", true),
-        t("channel_width"), t("standard"), t("capabilities"),
+        t("channel_width"), t("standard"), t("capabilities"), t("features"),
     )
     val GNSS_SATELLITE = def(
         Table.GNSS_SATELLITE, i("svid", true), t("constellation", true), r("cn0_dbhz", true), r("elevation", true),
@@ -97,6 +103,7 @@ object Schema {
         Table.PROBE, t("probe_type", true), t("endpoint", true), i("success", true), t("error"), r("dns_ms"),
         r("connect_ms"), r("tls_ms"), r("ttfb_ms"), r("total_ms"), i("bytes"), r("mbps"), t("interface"),
         i("is_cellular"), t("public_ip"), t("asn"), t("asn_org"),
+        i("http_status"), i("redirect_count"), t("final_url"), i("expected_response"),
     )
     val DEVICE = def(Table.DEVICE, r("battery"), i("charging"), i("low_power"), t("thermal_state"))
     val EVENT = def(
@@ -105,10 +112,16 @@ object Schema {
     )
     val ANNOTATION = def(Table.ANNOTATION, t("text"), t("audio_path"))
     val METRICKIT_PAYLOAD = def(Table.METRICKIT_PAYLOAD, t("payload_json", true))
+    val WAYPOINT = def(Table.WAYPOINT, i("seq", true), t("label"), r("lat"), r("lon"), r("h_acc_m"), t("provider"))
+    val WIFI_ROAM = def(
+        Table.WIFI_ROAM, t("ssid"), t("from_bssid"), t("to_bssid"), t("from_band"), t("to_band"), i("from_rssi_dbm"),
+        i("to_rssi_dbm"), i("link_down_ms"), r("latency_penalty_ms"), r("rtt_before_ms"), r("rtt_after_ms"),
+        i("target_11k"), i("target_11v"), i("target_11r"),
+    )
 
     val X_ANDROID_NETWORK = def(
         Table.X_ANDROID_NETWORK, i("network_handle"), t("transports"), i("validated"), i("captive_portal"),
-        i("not_metered"), i("down_kbps"), i("up_kbps"), t("interface"), t("dns_servers"), t("private_dns"),
+        i("not_metered"), i("down_kbps"), i("up_kbps"), t("interface"), t("dns_servers"), t("private_dns"), t("ifname"),
     )
     val X_ANDROID_WIFI_LINK = def(
         Table.X_ANDROID_WIFI_LINK, t("bssid"), i("tx_link_mbps"), i("rx_link_mbps"), i("max_tx_mbps"),
@@ -121,11 +134,17 @@ object Schema {
     )
     val X_EVENT_LABEL = def(Table.X_EVENT_LABEL, i("event_id", true), t("label", true))
     val X_GAP = def(Table.X_GAP, i("start_utc_ms", true), i("end_utc_ms", true), t("reason", true))
+    val X_ANDROID_CARRIER = def(
+        Table.X_ANDROID_CARRIER, t("service_id", true), i("idx", true), t("rat", true), t("band"), i("arfcn"), i("pci"),
+        r("bandwidth_mhz"), i("is_primary", true), t("source", true),
+    )
+    val X_COLLECTOR_LOG = def(Table.X_COLLECTOR_LOG, t("collector", true), t("health", true), t("message"), i("restarts"))
 
     val all: List<TableDef> = listOf(
         RUNS, LOCATION, MOTION, NETWORK_PATH, RADIO, WIFI_CONNECTION, CELL_SERVING, CELL_NEIGHBOUR, WIFI_SCAN,
-        GNSS_SATELLITE, PROBE, DEVICE, EVENT, ANNOTATION, METRICKIT_PAYLOAD,
+        GNSS_SATELLITE, PROBE, DEVICE, EVENT, ANNOTATION, METRICKIT_PAYLOAD, WAYPOINT, WIFI_ROAM,
         X_ANDROID_NETWORK, X_ANDROID_WIFI_LINK, X_ANDROID_GNSS_RAW, X_ANDROID_WIFI_RTT, X_EVENT_LABEL, X_GAP,
+        X_ANDROID_CARRIER, X_COLLECTOR_LOG,
     )
     val shared: List<TableDef> = all.filter { it.table.isShared }
     val sampleTables: List<TableDef> = all.filter { it.table != Table.RUNS }
@@ -134,6 +153,24 @@ object Schema {
     fun of(table: Table): TableDef = byTable.getValue(table)
 
     fun createAllSql(): List<String> = all.flatMap { listOf(it.createSql()) + it.indexSql() }
+
+    /**
+     * Upgrade SQL from [from] to [from]+1 for databases created with the canonical DDL. New tables
+     * come from createAllSql() (IF NOT EXISTS); this adds the new columns to existing tables.
+     * `runs` is listed too — Room-managed databases apply it through a Room Migration instead.
+     */
+    fun migrationSql(from: Int): List<String> = when (from) {
+        1 -> listOf(
+            "ALTER TABLE runs ADD COLUMN site TEXT", "ALTER TABLE runs ADD COLUMN test_number INTEGER",
+            "ALTER TABLE runs ADD COLUMN protocol TEXT", "ALTER TABLE runs ADD COLUMN time_zone TEXT",
+            "ALTER TABLE runs ADD COLUMN method_fingerprint TEXT",
+            "ALTER TABLE probe ADD COLUMN http_status INTEGER", "ALTER TABLE probe ADD COLUMN redirect_count INTEGER",
+            "ALTER TABLE probe ADD COLUMN final_url TEXT", "ALTER TABLE probe ADD COLUMN expected_response INTEGER",
+            "ALTER TABLE wifi_scan ADD COLUMN features TEXT",
+            "ALTER TABLE x_android_network ADD COLUMN ifname TEXT",
+        )
+        else -> emptyList()
+    }
 
     /** Stable fingerprint of the shared schema; iOS computes the same string and compares. */
     fun sharedFingerprint(): String =

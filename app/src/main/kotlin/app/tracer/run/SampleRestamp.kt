@@ -7,6 +7,10 @@ import app.tracer.core.model.DeviceSample
 import app.tracer.core.model.EventLabelSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.GapSample
+import app.tracer.core.model.CollectorLogSample
+import app.tracer.core.model.CarrierSample
+import app.tracer.core.model.WifiRoamSample
+import app.tracer.core.model.WaypointSample
 import app.tracer.core.model.GnssRawSample
 import app.tracer.core.model.GnssSatelliteSample
 import app.tracer.core.model.LocationSample
@@ -52,5 +56,9 @@ fun Sample.restamp(runId: String, stamp: Stamp): Sample {
         is WifiRttSample -> copy(runId = runId, stamp = stamp)
         is EventLabelSample -> copy(runId = runId, stamp = stamp)
         is GapSample -> copy(runId = runId, stamp = stamp, startUtcMs = startUtcMs + dUtc, endUtcMs = endUtcMs + dUtc)
+        is WaypointSample -> copy(runId = runId, stamp = stamp)
+        is WifiRoamSample -> copy(runId = runId, stamp = stamp)
+        is CarrierSample -> copy(runId = runId, stamp = stamp)
+        is CollectorLogSample -> copy(runId = runId, stamp = stamp)
     }
 }

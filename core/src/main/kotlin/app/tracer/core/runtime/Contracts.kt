@@ -131,6 +131,8 @@ interface RunRepository {
     /** Absolute path of the live SQLite file (for export ATTACH). */
     fun databaseFile(): File
     suspend fun deleteOlderThan(cutoffUtcMs: Long): Int
+    /** max(test_number) + 1 for runs at [site] (case-insensitive), 1 if none. */
+    suspend fun nextTestNumber(site: String): Int
 }
 
 /** :export. */
@@ -166,11 +168,19 @@ interface RunController {
     val state: StateFlow<RunState>
     val live: StateFlow<LiveSnapshot>
     val runId: StateFlow<String?>
-    fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String? = null)
+    /**
+     * @param site where the run is recorded ("Office"); the service assigns the next test number for the
+     *        site and names the run "Office · T3 · 2026-11-03 18:31" (falls back to [name] when null).
+     * @param protocolId a [app.tracer.core.analysis.Protocol] id: fixed settings + fixed duration (auto-stop);
+     *        [settings] is ignored when set.
+     */
+    fun start(name: String, mode: String, settings: RunSettings, simulateScenario: String? = null, site: String? = null, protocolId: String? = null)
     fun pause()
     fun resume()
     fun stop()
     fun markMoment(text: String?, audioPath: String? = null)
+    /** Tap-to-mark: [tappedAt] is captured at the tap; the label may be added afterwards (null = unlabeled). */
+    fun markWaypoint(label: String?, tappedAt: Stamp)
 }
 
 /** :collectors. Active SIMs for pre-flight + per-subscription TelephonyManager. */

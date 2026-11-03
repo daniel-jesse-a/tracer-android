@@ -67,7 +67,7 @@ data class Thresholds(
     companion object {
         fun fromJson(text: String): Thresholds = fromJson(Json.parseToJsonElement(text).jsonObject)
 
-        fun fromJson(o: JsonObject): Thresholds {
+        fun fromJson(o: JsonObject, migrate: Boolean = true): Thresholds {
             val d = Thresholds()
             fun dbl(k: String, def: Double) = o[k]?.jsonPrimitive?.doubleOrNull ?: def
             fun int(k: String, def: Int) = o[k]?.jsonPrimitive?.doubleOrNull?.toInt() ?: def
@@ -78,7 +78,7 @@ data class Thresholds(
                 gpsRecoverS = dbl("gps_recover_s", d.gpsRecoverS), gpsNoFixS = dbl("gps_no_fix_s", d.gpsNoFixS),
                 latencyFactor = dbl("latency_factor", d.latencyFactor), latencyMinMs = dbl("latency_min_ms", d.latencyMinMs),
                 latencyWindow = int("latency_window", d.latencyWindow), dnsFactor = dbl("dns_factor", d.dnsFactor),
-                dnsMinMs = dbl("dns_min_ms", d.dnsMinMs).let { if (it == 100.0) d.dnsMinMs else it }, throughputDropFraction = dbl("throughput_drop_fraction", d.throughputDropFraction),
+                dnsMinMs = dbl("dns_min_ms", d.dnsMinMs).let { if (migrate && it == 100.0) d.dnsMinMs else it }, throughputDropFraction = dbl("throughput_drop_fraction", d.throughputDropFraction),
                 throughputMinSamples = int("throughput_min_samples", d.throughputMinSamples), signalDropDb = int("signal_drop_db", d.signalDropDb),
                 signalDropWindowS = dbl("signal_drop_window_s", d.signalDropWindowS), overtakeDb = int("overtake_db", d.overtakeDb),
                 overtakeHoldS = dbl("overtake_hold_s", d.overtakeHoldS), dropConsecutiveFailures = int("drop_consecutive_failures", d.dropConsecutiveFailures),
@@ -96,7 +96,26 @@ data class Thresholds(
     }
 }
 
-data class ProbeEndpoint(val url: String, val label: String, val regional: Boolean = false)
+/**
+ * @param expectStatus the HTTP status this endpoint should end on (after redirects); null = any 2xx.
+ *        A response with another status is still *reachable* — it just isn't the *expected response*.
+ */
+data class ProbeEndpoint(val url: String, val label: String, val regional: Boolean = false, val expectStatus: Int? = null) {
+    fun isExpected(finalStatus: Int?): Boolean = finalStatus != null && (expectStatus?.let { finalStatus == it } ?: (finalStatus in 200..299))
+}
+
+/** Which networks probes run on. */
+enum class ProbePaths(val key: String) {
+    /** default network only */
+    DEFAULT("default"),
+    /** default network + mobile data in parallel while Wi-Fi is the default */
+    DUAL("dual"),
+    /** Wi-Fi network only (never falls back to cellular) */
+    WIFI_ONLY("wifi_only"),
+    /** mobile-data network only (requested even when Wi-Fi is connected) */
+    CELLULAR_ONLY("cellular_only");
+    companion object { fun of(key: String?) = entries.firstOrNull { it.key == key } }
+}
 
 /** User-tunable run settings. Persisted to DataStore as JSON and snapshotted into runs.settings_json. */
 data class RunSettings(
@@ -106,7 +125,8 @@ data class RunSettings(
     val gnssRawMeasurements: Boolean = false,
     val cellPollIntervalMs: Long = 1_000,
     val wifiScanIntervalMs: Long = 30_000,
-    val wifiRttEnabled: Boolean = false,
+    /** Ranges to APs that advertise 802.11mc/az responder support (indoor position aid). */
+    val wifiRttEnabled: Boolean = true,
     val latencyIntervalMs: Long = 2_000,
     val adaptiveLatency: Boolean = true,
     val throughputIntervalMs: Long = 120_000,
@@ -117,6 +137,12 @@ data class RunSettings(
     val throughputMaxMs: Long = 4_000,
     /** Also probe the mobile-data network while Wi-Fi is the default (uses a little mobile data). */
     val dualPathProbing: Boolean = true,
+    /** Overrides [dualPathProbing] when set (protocol runs pin the path). */
+    val probePaths: ProbePaths? = null,
+    /** Per-run cap on throughput-test bytes over cellular; once reached, cellular throughput tests pause (latency continues). */
+    val cellularDataBudgetMb: Long = 500,
+    /** Internal probes: ICMP to the default gateway + UDP DNS query to each DHCP DNS server. */
+    val internalProbes: Boolean = true,
     val publicIpIntervalMs: Long = 300_000,
     val deviceIntervalMs: Long = 30_000,
     val motionHz: Int = 10,
@@ -142,6 +168,9 @@ data class RunSettings(
         gnssRawMeasurements = false,
     )
 
+    /** Effective probe-path mode. */
+    val paths: ProbePaths get() = probePaths ?: if (dualPathProbing) ProbePaths.DUAL else ProbePaths.DEFAULT
+
     fun toJson(): JsonObject = buildJsonObject {
         put("settings_version", SETTINGS_VERSION)
         put("location_interval_ms", locationIntervalMs); put("use_fused_comparison", useFusedComparison)
@@ -150,10 +179,12 @@ data class RunSettings(
         put("latency_interval_ms", latencyIntervalMs); put("adaptive_latency", adaptiveLatency)
         put("throughput_interval_ms", throughputIntervalMs); put("throughput_bytes", throughputBytes)
         put("throughput_max_ms", throughputMaxMs); put("dual_path_probing", dualPathProbing)
+        probePaths?.let { put("probe_paths", it.key) }
+        put("cellular_data_budget_mb", cellularDataBudgetMb); put("internal_probes", internalProbes)
         put("public_ip_interval_ms", publicIpIntervalMs); put("device_interval_ms", deviceIntervalMs)
         put("motion_hz", motionHz); put("battery_saver", batterySaver)
         putJsonArray("endpoints") {
-            endpoints.forEach { e -> addJsonObject { put("url", e.url); put("label", e.label); put("regional", e.regional) } }
+            endpoints.forEach { e -> addJsonObject { put("url", e.url); put("label", e.label); put("regional", e.regional); e.expectStatus?.let { put("expect_status", it) } } }
         }
         put("throughput_url", throughputUrl); put("public_ip_url", publicIpUrl); put("captive_url", captiveUrl)
         openCellIdKey?.let { put("opencellid_key_set", true) } // never export the key itself
@@ -169,12 +200,18 @@ data class RunSettings(
 
     companion object {
         /** Non-redirecting, tiny-response anycast endpoints (204/200). Redirects inflate TTFB and used to read as failures. */
-        const val SETTINGS_VERSION = 2
+        const val SETTINGS_VERSION = 3
+
+        /** Defaults of builds ≤ 1.0.8 — used for keys missing from an un-migrated (as-recorded) settings JSON. */
+        private val LEGACY_V1_DEFAULTS by lazy {
+            RunSettings(throughputBytes = 1_000_000, throughputIntervalMs = 60_000, throughputMaxMs = Long.MAX_VALUE,
+                dualPathProbing = false, wifiRttEnabled = false, useFusedComparison = false, internalProbes = false)
+        }
 
         val DEFAULT_ENDPOINTS = listOf(
-            ProbeEndpoint("https://cp.cloudflare.com/generate_204", "Cloudflare"),
-            ProbeEndpoint("https://www.google.com/generate_204", "Google"),
-            ProbeEndpoint("https://captive.apple.com/hotspot-detect.html", "Apple"),
+            ProbeEndpoint("https://cp.cloudflare.com/generate_204", "Cloudflare", expectStatus = 204),
+            ProbeEndpoint("https://www.google.com/generate_204", "Google", expectStatus = 204),
+            ProbeEndpoint("https://captive.apple.com/hotspot-detect.html", "Apple", expectStatus = 200),
             ProbeEndpoint("https://www.etisalat.ae/", "Regional (e&)", regional = true),
         )
 
@@ -185,10 +222,15 @@ data class RunSettings(
             "https://www.apple.com/library/test/success.html" to "https://captive.apple.com/hotspot-detect.html",
         )
 
-        fun fromJson(text: String): RunSettings {
+        /**
+         * @param migrate apply upgrades of older stored settings (new defaults, legacy endpoints).
+         *        Pass false to read back *exactly what a run used* (method fingerprint of old runs).
+         */
+        fun fromJson(text: String, migrate: Boolean = true): RunSettings {
             val o = Json.parseToJsonElement(text).jsonObject
-            val d = RunSettings()
-            val legacy = (o["settings_version"]?.jsonPrimitive?.intOrNull ?: 1) < SETTINGS_VERSION
+            val d = if (migrate) RunSettings() else LEGACY_V1_DEFAULTS
+            val version = if (migrate) o["settings_version"]?.jsonPrimitive?.intOrNull ?: 1 else SETTINGS_VERSION
+            val legacy = version < 2
             fun lng(k: String, def: Long) = o[k]?.jsonPrimitive?.doubleOrNull?.toLong() ?: def
             fun int(k: String, def: Int) = o[k]?.jsonPrimitive?.doubleOrNull?.toInt() ?: def
             fun bool(k: String, def: Boolean) = o[k]?.jsonPrimitive?.booleanOrNull ?: def
@@ -196,7 +238,9 @@ data class RunSettings(
             val eps = o["endpoints"]?.jsonArray?.mapNotNull { e ->
                 val eo = e.jsonObject
                 val url = eo["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                ProbeEndpoint(LEGACY_ENDPOINTS[url] ?: url, eo["label"]?.jsonPrimitive?.contentOrNull ?: url, eo["regional"]?.jsonPrimitive?.booleanOrNull ?: false)
+                val u = if (migrate) LEGACY_ENDPOINTS[url] ?: url else url
+                ProbeEndpoint(u, eo["label"]?.jsonPrimitive?.contentOrNull ?: url, eo["regional"]?.jsonPrimitive?.booleanOrNull ?: false,
+                    eo["expect_status"]?.jsonPrimitive?.intOrNull ?: DEFAULT_ENDPOINTS.firstOrNull { it.url == u }?.expectStatus)
             }
             return RunSettings(
                 locationIntervalMs = lng("location_interval_ms", d.locationIntervalMs),
@@ -205,13 +249,17 @@ data class RunSettings(
                 gnssRawMeasurements = bool("gnss_raw_measurements", d.gnssRawMeasurements),
                 cellPollIntervalMs = lng("cell_poll_interval_ms", d.cellPollIntervalMs),
                 wifiScanIntervalMs = lng("wifi_scan_interval_ms", d.wifiScanIntervalMs),
-                wifiRttEnabled = bool("wifi_rtt_enabled", d.wifiRttEnabled),
+                // v3 turns RTT on (it only ranges to APs that support it)
+                wifiRttEnabled = if (version < 3) true else bool("wifi_rtt_enabled", d.wifiRttEnabled),
                 latencyIntervalMs = lng("latency_interval_ms", d.latencyIntervalMs),
                 adaptiveLatency = bool("adaptive_latency", d.adaptiveLatency),
-                throughputIntervalMs = lng("throughput_interval_ms", d.throughputIntervalMs).let { if (it == 60_000L) d.throughputIntervalMs else it },
-                throughputBytes = lng("throughput_bytes", d.throughputBytes).let { if (it == 1_000_000L) d.throughputBytes else it },
+                throughputIntervalMs = lng("throughput_interval_ms", d.throughputIntervalMs).let { if (migrate && it == 60_000L) d.throughputIntervalMs else it },
+                throughputBytes = lng("throughput_bytes", d.throughputBytes).let { if (migrate && it == 1_000_000L) d.throughputBytes else it },
                 throughputMaxMs = lng("throughput_max_ms", d.throughputMaxMs),
                 dualPathProbing = bool("dual_path_probing", d.dualPathProbing),
+                probePaths = ProbePaths.of(o["probe_paths"]?.jsonPrimitive?.contentOrNull),
+                cellularDataBudgetMb = lng("cellular_data_budget_mb", d.cellularDataBudgetMb),
+                internalProbes = bool("internal_probes", d.internalProbes),
                 publicIpIntervalMs = lng("public_ip_interval_ms", d.publicIpIntervalMs),
                 deviceIntervalMs = lng("device_interval_ms", d.deviceIntervalMs),
                 motionHz = int("motion_hz", d.motionHz), batterySaver = bool("battery_saver", d.batterySaver),
@@ -220,7 +268,7 @@ data class RunSettings(
                 captiveUrl = str("captive_url", d.captiveUrl)!!, openCellIdKey = str("opencellid_key", null),
                 uploadUrl = str("upload_url", null), retentionDays = int("retention_days", d.retentionDays),
                 minFreeStorageMb = lng("min_free_storage_mb", d.minFreeStorageMb),
-                thresholds = o["thresholds"]?.jsonObject?.let { Thresholds.fromJson(it) } ?: d.thresholds,
+                thresholds = o["thresholds"]?.jsonObject?.let { Thresholds.fromJson(it, migrate) } ?: d.thresholds,
             )
         }
     }

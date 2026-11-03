@@ -32,6 +32,9 @@ enum class Table(val sqlName: String) {
     EVENT("event"),
     ANNOTATION("annotation"),
     METRICKIT_PAYLOAD("metrickit_payload"),
+    // v2 shared tables
+    WAYPOINT("waypoint"),
+    WIFI_ROAM("wifi_roam"),
 
     // Android-only extension tables (prefixed x_). The iOS importer ignores unknown tables;
     // the shared tables above are byte-for-byte identical in column set and order.
@@ -40,9 +43,13 @@ enum class Table(val sqlName: String) {
     X_ANDROID_GNSS_RAW("x_android_gnss_raw"),
     X_ANDROID_WIFI_RTT("x_android_wifi_rtt"),
     X_EVENT_LABEL("x_event_label"),
-    X_GAP("x_gap");
+    X_GAP("x_gap"),
+    X_ANDROID_CARRIER("x_android_carrier"),
+    X_COLLECTOR_LOG("x_collector_log");
 
     val isShared: Boolean get() = !sqlName.startsWith("x_")
+    /** Produced only by the iOS app; Android bundles omit these files. */
+    val iosOnly: Boolean get() = this == METRICKIT_PAYLOAD
 
     companion object {
         private val byName = entries.associateBy { it.sqlName }
@@ -113,9 +120,9 @@ data class RadioSample(
     val serviceId: String,
     /** NONE | GSM | UMTS | HSPA | LTE | LTE_CA | LTE_ADV_PRO | NR_NSA | NR_NSA_MMWAVE | NR_ADVANCED | NR_SA | UNKNOWN */
     val rat: String,
-    /** none | restricted | not_restricted | connected (Android NR state) */
+    /** v2: derived from TelephonyDisplayInfo override type + carriers: none | nsa | nsa_advanced | sa */
     val nrState: String? = null,
-    /** JSON: {"active":bool,"bandwidths_khz":[..],"cell_count":n} */
+    /** JSON: {"active":bool,"cell_count":n,"aggregate_mhz":x,"bandwidths_khz":[..],"carriers":[{"rat","band","arfcn","bandwidth_mhz","primary"}]} */
     val carrierAggregation: String? = null,
 ) : Sample { override val table get() = Table.RADIO }
 
@@ -177,6 +184,8 @@ data class WifiScanSample(
     val channelWidth: String? = null,
     val standard: String? = null,
     val capabilities: String? = null,
+    /** v2: comma list from the AP's IEs/AKMs: "11k" (RM enabled caps), "11v" (BSS transition), "11r" (FT AKM / mobility domain) */
+    val features: String? = null,
 ) : Sample { override val table get() = Table.WIFI_SCAN }
 
 data class GnssSatelliteSample(
@@ -195,7 +204,7 @@ data class GnssSatelliteSample(
 data class ProbeSample(
     override val runId: String,
     override val stamp: Stamp,
-    /** latency | throughput | public_ip | captive */
+    /** latency | throughput | public_ip | captive | gateway (ICMP to default gateway) | dns_server (UDP query to a DHCP DNS server) */
     val probeType: String,
     val endpoint: String,
     val success: Boolean,
@@ -208,12 +217,22 @@ data class ProbeSample(
     val totalMs: Double? = null,
     val bytes: Long? = null,
     val mbps: Double? = null,
+    /** v2: transport name wifi | cellular | ethernet | vpn (never wlan0/rmnet1) */
     val iface: String? = null,
     val isCellular: Boolean? = null,
     val publicIp: String? = null,
     val asn: String? = null,
     val asnOrg: String? = null,
-) : Sample { override val table get() = Table.PROBE }
+    // v2: [success] means "reachable" (any HTTP response / DNS answer / ping reply). Whether the
+    // response was the one the endpoint should return is [expectedResponse]. A redirect is reachable.
+    val httpStatus: Int? = null,
+    val redirectCount: Int? = null,
+    val finalUrl: String? = null,
+    val expectedResponse: Boolean? = null,
+) : Sample {
+    override val table get() = Table.PROBE
+    val reachable: Boolean get() = success
+}
 
 data class DeviceSample(
     override val runId: String,
@@ -269,6 +288,8 @@ data class AndroidNetworkSample(
     val iface: String? = null,
     val dnsServers: String? = null,
     val privateDns: String? = null,
+    /** kernel interface name (wlan0, rmnet1, …); [iface] holds the transport name (wifi | cellular) */
+    val ifname: String? = null,
 ) : Sample { override val table get() = Table.X_ANDROID_NETWORK }
 
 data class WifiLinkSample(
@@ -320,3 +341,72 @@ data class GapSample(
     /** pause | process_restart | storage_low | permission_revoked | airplane_mode | watchdog */
     val reason: String,
 ) : Sample { override val table get() = Table.X_GAP }
+
+// ---------- v2 shared tables ----------
+
+/** User-marked point (tap-to-mark), optionally labelled. Position = best fix at tap time. */
+data class WaypointSample(
+    override val runId: String,
+    override val stamp: Stamp,
+    val seq: Int,
+    val label: String? = null,
+    val lat: Double? = null,
+    val lon: Double? = null,
+    val hAccM: Double? = null,
+    val provider: String? = null,
+) : Sample { override val table get() = Table.WAYPOINT }
+
+/** One Wi-Fi roam (BSSID change within an SSID), written ~10 s after the roam once the penalty is known. */
+data class WifiRoamSample(
+    override val runId: String,
+    override val stamp: Stamp,
+    val ssid: String? = null,
+    val fromBssid: String? = null,
+    val toBssid: String? = null,
+    /** "2.4" | "5" | "6" */
+    val fromBand: String? = null,
+    val toBand: String? = null,
+    val fromRssiDbm: Int? = null,
+    val toRssiDbm: Int? = null,
+    /** Disconnect → re-association, from the Wi-Fi link callbacks; 0 = seamless (no disconnect observed) */
+    val linkDownMs: Long? = null,
+    /** Median Wi-Fi-path RTT in the 10 s after the roam minus the median in the 30 s before. */
+    val latencyPenaltyMs: Double? = null,
+    val rttBeforeMs: Double? = null,
+    val rttAfterMs: Double? = null,
+    /** From the target AP's scan IEs; null = target not seen in a recent scan */
+    val target11k: Boolean? = null,
+    val target11v: Boolean? = null,
+    val target11r: Boolean? = null,
+) : Sample { override val table get() = Table.WIFI_ROAM }
+
+// ---------- v2 Android extension tables ----------
+
+/** One component carrier of a (possibly aggregated / EN-DC) connection, per radio update. */
+data class CarrierSample(
+    override val runId: String,
+    override val stamp: Stamp,
+    val serviceId: String,
+    /** 0 = primary (PCell) */
+    val index: Int,
+    /** LTE | NR */
+    val rat: String,
+    val band: String? = null,
+    val arfcn: Int? = null,
+    val pci: Int? = null,
+    val bandwidthMhz: Double? = null,
+    val primary: Boolean,
+    /** bandwidth+cellinfo (matched) | bandwidth (RAT inferred from width) */
+    val source: String,
+) : Sample { override val table get() = Table.X_ANDROID_CARRIER }
+
+/** Collector health transition (kept apart from user waypoints/annotations). */
+data class CollectorLogSample(
+    override val runId: String,
+    override val stamp: Stamp,
+    val collector: String,
+    /** ok | degraded | unavailable | stopped | disabled */
+    val health: String,
+    val message: String? = null,
+    val restarts: Int? = null,
+) : Sample { override val table get() = Table.X_COLLECTOR_LOG }

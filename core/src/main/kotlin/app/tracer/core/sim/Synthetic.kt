@@ -52,14 +52,14 @@ class SecondBuilder internal constructor(
     }
 
     fun latency(ms: Double?, dnsMs: Double = 8.0, endpoint: String = "https://1.1.1.1/cdn-cgi/trace", cellular: Boolean = true, error: String? = null) {
-        out += if (ms == null) ProbeSample(runId, stamp(), "latency", endpoint, false, error ?: "timeout", iface = if (cellular) "rmnet0" else "wlan0", isCellular = cellular, totalMs = 3000.0)
+        out += if (ms == null) ProbeSample(runId, stamp(), "latency", endpoint, false, error ?: "timeout", iface = if (cellular) "cellular" else "wifi", isCellular = cellular, totalMs = 3000.0)
         // ms = round-trip time: TCP connect ≈ 1 RTT, TLS 1.3 ≈ 1 RTT, TTFB ≈ 1 RTT
-        else ProbeSample(runId, stamp(), "latency", endpoint, true, null, dnsMs, ms, ms, ms, 3 * ms + dnsMs, 0, null, if (cellular) "rmnet0" else "wlan0", cellular)
+        else ProbeSample(runId, stamp(), "latency", endpoint, true, null, dnsMs, ms, ms, ms, 3 * ms + dnsMs, 0, null, if (cellular) "cellular" else "wifi", cellular)
     }
 
     fun throughput(mbps: Double, cellular: Boolean = true) {
         out += ProbeSample(runId, stamp(), "throughput", "https://speed.cloudflare.com/__down?bytes=1000000", true, null, 8.0, 20.0, 25.0, 60.0,
-            1_000_000.0 * 8 / (mbps * 1000), 1_000_000, mbps, if (cellular) "rmnet0" else "wlan0", cellular)
+            1_000_000.0 * 8 / (mbps * 1000), 1_000_000, mbps, if (cellular) "cellular" else "wifi", cellular)
     }
 
     fun publicIp(ip: String, asn: String, org: String, cellular: Boolean = true) {

@@ -55,8 +55,10 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
             is WifiScanSample -> onScan(s)
             is NetworkPathSample -> onPath(s, out)
             is ProbeSample -> onProbe(s, out)
+            is AndroidNetworkSample -> onAndroidNet(s, out)
             else -> {}
         }
+        drainPending(out, force = false)
         return out
     }
 
@@ -65,6 +67,7 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         val out = mutableListOf<EventSample>()
         flushGnss(Stamp(0, Long.MAX_VALUE), out, force = true)
         flushScan()
+        drainPending(out, force = true)
         return out
     }
 
@@ -82,30 +85,36 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         return last == null || ctx.nowMs - last >= (th.minEventSpacingS * 1000).toLong()
     }
 
+    /**
+     * Events are detected immediately but *diagnosed* once the stream has reached T + 2 s, so cause
+     * attribution can use signals on both sides of the event (T ± 2 s). Output is therefore ≤ ~2 s late.
+     */
+    private class Pending(val tMs: Long, val stamp: Stamp, val type: String, val severity: String, val before: JsonObject?,
+                          val after: JsonObject?, val diagnose: Boolean, val extra: JsonObject, val lat: Double?, val lon: Double?)
+
+    private val pending = ArrayDeque<Pending>()
+
+    @Suppress("UNUSED_PARAMETER")
     private fun emit(
         out: MutableList<EventSample>, stamp: Stamp, type: String, severity: String,
         before: JsonObject?, after: JsonObject?, diagnose: Boolean = true, spacingKey: String? = null, extra: JsonObject = JsonObject(emptyMap()),
     ) {
         if (spacingKey != null) { if (!spaced(spacingKey)) return; ctx.lastEmit[spacingKey] = ctx.nowMs }
-        val dx = if (diagnose) causes.diagnose(type, ctx, extra) else null
         val ll = ctx.lastLatLon()
-        out += EventSample(
-            runId = runId, stamp = Stamp(stamp.tUtcMs, stamp.tMonoNs), eventType = type, severity = severity,
-            beforeJson = before?.toString(), afterJson = after?.toString(), lat = ll?.first, lon = ll?.second,
-            likelyCause = dx?.best?.cause, causeConfidence = dx?.best?.confidence,
-            evidenceJson = dx?.evidenceJson(snapshot()),
-        )
+        pending += Pending(stamp.tMonoMs, Stamp(stamp.tUtcMs, stamp.tMonoNs), type, severity, before, after, diagnose, extra, ll?.first, ll?.second)
     }
 
-    private fun snapshot(): JsonObject = buildJsonObject {
-        ctx.primaryServing()?.let { put("serving", cellJson(it)) }
-        ctx.radio.values.lastOrNull()?.let { put("rat", it.rat) }
-        ctx.wifi?.let { put("wifi", wifiJson(it)) }
-        ctx.path?.let { put("path_status", it.status); put("primary_interface", it.primaryInterface) }
-        ctx.gnssEpochs.last()?.let { put("gnss_used", it.used); put("gnss_mean_top_cn0", it.meanTopCn0) }
-        ctx.lastLocation?.let { put("speed_mps", it.speedMps); put("h_acc_m", it.hAccM) }
-        put("median_rtt_ms", ctx.medianLatency())
-        put("consecutive_failures", ctx.pathState(ctx.defaultPath()).consecutiveFailures)
+    private fun drainPending(out: MutableList<EventSample>, force: Boolean) {
+        while (pending.isNotEmpty() && (force || ctx.nowMs - pending.first().tMs >= CauseEngine.NEAR_MS)) {
+            val p = pending.removeFirst()
+            val dx = if (p.diagnose) causes.diagnose(p.type, ctx, p.tMs, p.extra) else null
+            out += EventSample(
+                runId = runId, stamp = p.stamp, eventType = p.type, severity = p.severity,
+                beforeJson = p.before?.toString(), afterJson = p.after?.toString(), lat = p.lat, lon = p.lon,
+                likelyCause = dx?.best?.cause, causeConfidence = dx?.best?.confidence,
+                evidenceJson = dx?.evidenceJson(causes.snapshot(ctx, p.tMs)),
+            )
+        }
     }
 
     private fun cellJson(c: CellSample) = buildJsonObject {
@@ -250,6 +259,7 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     private fun onRadio(r: RadioSample, out: MutableList<EventSample>) {
         val prev = ctx.radio[r.serviceId]
         ctx.radio[r.serviceId] = r
+        ctx.radioHistory.add(ctx.nowMs, r)
         if (prev != null && prev.rat != r.rat) {
             ctx.ratChanges.add(ctx.nowMs, prev.rat to r.rat)
             val down = Context.ratRank(r.rat) < Context.ratRank(prev.rat)
@@ -281,6 +291,7 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     private fun flushScan() {
         if (ctx.pendingScan.isEmpty()) return
         ctx.lastScan = ctx.pendingScan.toList()
+        ctx.scanHistory.add(ctx.pendingScan.first().stamp.tMonoMs, ctx.lastScan)
         ctx.pendingScan.clear(); ctx.pendingScanId = null
     }
 
@@ -315,6 +326,18 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
             // default network moved to another transport: the old path's outage is not "ongoing" for the user
             val old = ctx.pathState(path)
             if (old.dropped) endDrop(out, p.stamp, path, old, primary)
+        }
+    }
+
+    /** Android's validation / captive flags (x_android_network): the only source of captive_portal events besides path. */
+    private fun onAndroidNet(n: AndroidNetworkSample, out: MutableList<EventSample>) {
+        val prev = ctx.androidNet.last()
+        ctx.androidNet.add(ctx.nowMs, n)
+        if (n.captivePortal == true && prev?.captivePortal != true && ctx.path?.unsatisfiedReason != "captive_portal") {
+            val path = SampleCodecIface.pathOf(n)
+            emit(out, n.stamp, EventType.CAPTIVE_PORTAL, Severity.WARNING, null,
+                buildJsonObject { put("android_captive_flag", true); put("validated", n.validated); put("path", path) },
+                spacingKey = EventType.CAPTIVE_PORTAL, extra = pathExtra(path))
         }
     }
 
@@ -372,10 +395,9 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
                         extra = buildJsonObject { put("asn_changed", asnChanged); put("is_cellular", p.isCellular); put("path", path) })
                 }
             }
-            "captive" -> if (!p.success && p.error?.startsWith("http_") == true && p.error != "http_204") {
-                emit(out, p.stamp, EventType.CAPTIVE_PORTAL, Severity.WARNING, null, buildJsonObject { put("error", p.error); put("path", path) },
-                    spacingKey = EventType.CAPTIVE_PORTAL, extra = pathExtra(path))
-            }
+            // The captive check is evidence only; captive_portal events come from Android's own flags.
+            "captive" -> {}
+            "gateway", "dns_server" -> ctx.internalProbes.add(ctx.nowMs, p)
         }
     }
 
@@ -428,4 +450,9 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
             val keep = ps.latencyOk.toList().takeLast(th.latencyWindow); ps.latencyOk.clear(); keep.forEach { ps.latencyOk.add(it) }
         }
     }
+}
+
+private object SampleCodecIface {
+    fun pathOf(n: AndroidNetworkSample): String =
+        if (n.transports?.contains("cellular", ignoreCase = true) == true || n.iface == "cellular") "cellular" else "wifi"
 }

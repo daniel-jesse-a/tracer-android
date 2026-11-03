@@ -39,7 +39,14 @@ class Context(val th: Thresholds) {
 
     // wifi
     var wifi: WifiConnectionSample? = null; internal set
-    val wifiHistory = TimeWindow<WifiConnectionSample>(60_000)
+    val wifiHistory = TimeWindow<WifiConnectionSample>(180_000)
+    /** every completed scan, for "latest scan at or before T" lookups */
+    val scanHistory = TimeWindow<List<WifiScanSample>>(180_000)
+    val radioHistory = TimeWindow<RadioSample>(180_000)
+    /** Android network validation / captive flags (x_android_network) */
+    val androidNet = TimeWindow<AndroidNetworkSample>(180_000)
+    /** gateway / dns_server probes */
+    val internalProbes = TimeWindow<ProbeSample>(180_000)
     val roamTimes = TimeWindow<String>(120_000)
     var lastScan: List<WifiScanSample> = emptyList(); internal set
     internal var pendingScanId: Long? = null

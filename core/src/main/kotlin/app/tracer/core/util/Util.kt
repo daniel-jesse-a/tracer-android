@@ -64,6 +64,11 @@ class TimeWindow<T>(private val windowMs: Long) : Iterable<Pair<Long, T>> {
     fun since(nowMs: Long, ms: Long): List<T> = buf.filter { nowMs - it.first <= ms }.map { it.second }
     fun values(): List<T> = buf.map { it.second }
     fun last(): T? = buf.lastOrNull()?.second
+    /** Values with timestamps in [fromMs, toMs]. */
+    fun between(fromMs: Long, toMs: Long): List<T> = buf.filter { it.first in fromMs..toMs }.map { it.second }
+    /** Newest value at or before [tMs] (state reported on change is valid until the next report). */
+    fun lastAtOrBefore(tMs: Long): T? = buf.lastOrNull { it.first <= tMs }?.second
+    fun lastAtOrBeforeWithTime(tMs: Long): Pair<Long, T>? = buf.lastOrNull { it.first <= tMs }
     val size get() = buf.size
     override fun iterator(): Iterator<Pair<Long, T>> = buf.iterator()
 }

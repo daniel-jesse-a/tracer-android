@@ -7,6 +7,10 @@ import app.tracer.core.model.DeviceSample
 import app.tracer.core.model.EventLabelSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.GapSample
+import app.tracer.core.model.CollectorLogSample
+import app.tracer.core.model.CarrierSample
+import app.tracer.core.model.WifiRoamSample
+import app.tracer.core.model.WaypointSample
 import app.tracer.core.model.GnssRawSample
 import app.tracer.core.model.GnssSatelliteSample
 import app.tracer.core.model.LocationSample
@@ -53,13 +57,17 @@ class SampleRestampTest {
         WifiRttSample(r, st, "aa:bb:cc:dd:ee:ff", 0, 3000, 200, -60, 8, 7),
         EventLabelSample(r, st, 42L, "confirmed"),
         GapSample(r, st, 990_000L, 1_000_000L, "pause"),
+        WaypointSample(r, st, 1, "door B", 25.1, 55.2, 8.0, "fused"),
+        WifiRoamSample(r, st, "Office", "aa:aa:aa:aa:aa:01", "aa:aa:aa:aa:aa:02", "5", "2.4", -78, -60, 0, 42.0, 30.0, 72.0, true, true, false),
+        CarrierSample(r, st, "2", 1, "NR", "n41", 522990, 960, 90.0, false, "bandwidth+cellinfo"),
+        CollectorLogSample(r, st, "gnss", "degraded", "no sky", 0),
     )
 
     @Test
     fun coversEverySampleTypeAndTable() {
         val samples = everySubclass()
         // 19 concrete Sample classes exist; the exhaustive `when` in restamp() guarantees compile-time coverage.
-        assertEquals(19, samples.map { it::class }.toSet().size)
+        assertEquals(23, samples.map { it::class }.toSet().size)
         val tables = samples.map { it.table }.toSet() + Table.CELL_NEIGHBOUR // CellSample covers both
         assertEquals(Table.entries.toSet() - Table.RUNS, tables)
     }
