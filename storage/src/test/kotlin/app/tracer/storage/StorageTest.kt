@@ -110,8 +110,12 @@ class StorageTest {
         samples.forEach { writer.emit(it) }
         writer.flush()
         val counts = writer.counts(runId)
-        writer.flush() // seed runs on the writer thread, ordered before this flush completes
-        assertThat(counts.value.values.sum()).isEqualTo(100L)
+        // The seed query runs asynchronously on the writer thread; wait for it rather than
+        // relying on dispatcher ordering (flaky under Robolectric).
+        val seeded = kotlinx.coroutines.withTimeoutOrNull(5_000) {
+            counts.first { it.values.sum() == 100L }
+        }
+        assertThat(seeded?.values?.sum()).isEqualTo(100L)
     }
 
     // (3) round trip
