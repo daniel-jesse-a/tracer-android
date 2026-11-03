@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tracer</string>
+    <string name="default_run_name">Run</string>
+
+    <string name="channel_run">Recording</string>
+    <string name="channel_run_desc">Ongoing notification while a run is recording</string>
+    <string name="channel_alerts">Alerts</string>
+    <string name="channel_alerts_desc">Run stopped or interrupted</string>
+
+    <string name="notif_dash">—</string>
+    <!-- transport · RAT · RSRP · latency · event count -->
+    <string name="notif_text">%1$s · %2$s · RSRP %3$s dBm · %4$s ms · %5$d events</string>
+    <string name="notif_title_paused">%1$s · Paused</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_end">End</string>
+
+    <string name="alert_title">Tracer</string>
+    <string name="alert_storage_low">Run stopped: free storage fell below the configured minimum.</string>
+    <string name="alert_permission_revoked">Run stopped: location permission was revoked.</string>
+    <string name="alert_start_failed">Could not start the run. Check that location permission is granted.</string>
+    <string name="annotation_low_battery">Battery %1$d %% — battery-saver intervals enabled automatically</string>
+    <string name="alert_interrupted">Recording was interrupted. Open Tracer to resume the run.</string>
+</resources>

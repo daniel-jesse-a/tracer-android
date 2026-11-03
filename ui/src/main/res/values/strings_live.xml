@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live run, panels, summary, replay, event sheet, worst segments, map + chart components. -->
+<resources>
+    <!-- generic -->
+    <string name="live_back">Back</string>
+    <string name="live_cancel">Cancel</string>
+    <string name="live_more">More options</string>
+    <string name="live_fix">Fix</string>
+    <string name="live_no_data">no data</string>
+    <string name="live_no_events">No events yet</string>
+
+    <!-- live run -->
+    <string name="live_tab_live">Live</string>
+    <string name="live_tab_cells">Cells</string>
+    <string name="live_tab_wifi">Wi-Fi</string>
+    <string name="live_tab_gnss">GNSS</string>
+    <string name="live_state_paused">Paused</string>
+    <string name="live_mode_drive">Car</string>
+    <string name="live_mode_walk">Walk</string>
+    <string name="live_mode_rail">Train</string>
+    <string name="live_mode_static">Static</string>
+    <string name="live_mode_simulated">Simulated</string>
+    <string name="live_mode_custom">Custom</string>
+    <string name="live_mark">Mark moment</string>
+    <string name="live_mark_title">Mark this moment</string>
+    <string name="live_mark_hint">Optional note</string>
+    <string name="live_mark_confirm">Mark</string>
+    <string name="live_pause">Pause</string>
+    <string name="live_resume">Resume</string>
+    <string name="live_end">End run</string>
+    <string name="live_end_title">End this run?</string>
+    <string name="live_end_message">Recording stops and the run is saved. You can replay and export it afterwards.</string>
+    <string name="live_end_confirm">End run</string>
+
+    <!-- map layers -->
+    <string name="live_layer_quality">Quality</string>
+    <string name="live_layer_sinr">SINR</string>
+    <string name="live_layer_type">Type</string>
+    <string name="live_layer_latency">Latency</string>
+    <string name="live_layer_throughput">Throughput</string>
+    <string name="live_layer_wifi">Wi-Fi</string>
+    <string name="live_layer_gps">GPS</string>
+
+    <!-- tiles -->
+    <string name="live_tile_type">TYPE</string>
+    <string name="live_tile_rsrp">RSRP</string>
+    <string name="live_tile_rsrq">RSRQ</string>
+    <string name="live_tile_sinr">SINR</string>
+    <string name="live_tile_pci_cid">PCI · CID</string>
+    <string name="live_tile_band">BAND</string>
+    <string name="live_tile_tac_ta">TAC · TA</string>
+    <string name="live_tile_latency">LATENCY</string>
+    <string name="live_tile_loss">LOSS</string>
+    <string name="live_tile_thru">THRU ↓</string>
+    <string name="live_tile_gps_spd">GPS · SPD</string>
+    <string name="live_tile_wifi">WI-FI</string>
+    <string name="live_tile_cached">cached %1$s s</string>
+    <string name="live_tile_ago">%1$s ago</string>
+    <string name="live_tile_stale">stale %1$s</string>
+    <string name="live_tile_scan_aps">scan · %1$d APs</string>
+
+    <!-- timeline lanes -->
+    <string name="live_lane_type">TYPE</string>
+    <string name="live_lane_rat">RAT</string>
+    <string name="live_lane_rsrp">RSRP</string>
+    <string name="live_lane_sinr">SINR</string>
+    <string name="live_lane_latency">LAT</string>
+    <string name="live_lane_loss">LOSS</string>
+    <string name="live_lane_thru">THRU</string>
+    <string name="live_lane_wifi">WI-FI</string>
+    <string name="live_lane_gnss">GNSS</string>
+    <string name="live_lane_events">EVENTS</string>
+    <string name="live_lane_linked_lat">iP LAT</string>
+    <string name="live_lane_linked_rsrp">iP RSRP</string>
+    <string name="live_nodata_radio">no radio data</string>
+    <string name="live_nodata_cell">no cell data</string>
+    <string name="live_nodata_probe">no probe data</string>
+    <string name="live_nodata_thru">no throughput tests</string>
+    <string name="live_nodata_wifi">no Wi-Fi data</string>
+    <string name="live_nodata_gnss">no GNSS data</string>
+
+    <!-- cells -->
+    <string name="live_cells_sim">SIM %1$d</string>
+    <string name="live_cells_hz">%1$s Hz</string>
+    <string name="live_cells_no_serving">No serving cell reported</string>
+    <string name="live_cells_serving_anchor">Serving · LTE anchor</string>
+    <string name="live_cells_serving_rat">Serving · %1$s</string>
+    <string name="live_cells_sinr_q">SINR %1$s</string>
+    <string name="live_cells_nr_leg">NR leg</string>
+    <string name="live_cells_scell">SCell %1$s</string>
+    <string name="live_cells_neighbours">Neighbours · %1$d</string>
+    <string name="live_cells_sorted">sorted by RSRP</string>
+    <string name="live_cells_no_neighbours">No neighbour cells reported</string>
+    <string name="live_cells_overtaking">Overtaking serving by %1$s dB for %2$s s</string>
+    <string name="live_cells_ho_likely">" · HO likely"</string>
+
+    <!-- wi-fi -->
+    <string name="live_wifi_not_connected">Not connected to Wi-Fi</string>
+    <string name="live_wifi_connected">Connected</string>
+    <string name="live_wifi_hidden">(hidden network)</string>
+    <string name="live_wifi_band_load">%1$s GHz · %2$d APs</string>
+    <string name="live_wifi_scan">Scan · %1$d APs</string>
+    <string name="live_wifi_no_scan">No scan results yet</string>
+
+    <!-- gnss -->
+    <string name="live_gnss_sky">Sky plot</string>
+    <string name="live_gnss_used_visible">%1$d used / %2$d visible</string>
+    <string name="live_gnss_legend">filled = used in fix · ring = visible · colour = C/N0 quality · G GPS R GLONASS E Galileo C BeiDou J QZSS</string>
+    <string name="live_gnss_cn0">C/N0 per satellite (dB-Hz)</string>
+    <string name="live_gnss_none">No satellites in view</string>
+    <string name="live_gnss_used">used</string>
+    <string name="live_gnss_not_used">—</string>
+
+    <!-- event types -->
+    <string name="live_ev_handover">Handover</string>
+    <string name="live_ev_rat_change">RAT change</string>
+    <string name="live_ev_wifi_roam">Wi-Fi roam</string>
+    <string name="live_ev_wifi_cell_switch">Wi-Fi ↔ cell</string>
+    <string name="live_ev_drop">Drop</string>
+    <string name="live_ev_reconnect">Reconnect</string>
+    <string name="live_ev_captive_portal">Captive portal</string>
+    <string name="live_ev_ip_asn_change">IP / ASN change</string>
+    <string name="live_ev_gps_degraded">GPS degraded</string>
+    <string name="live_ev_latency_spike">Latency spike</string>
+    <string name="live_ev_dns_spike">DNS spike</string>
+    <string name="live_ev_throughput_drop">Throughput drop</string>
+    <string name="live_ev_signal_drop">Signal drop</string>
+    <string name="live_ev_neighbour_overtake">Neighbour overtake</string>
+
+    <!-- causes -->
+    <string name="live_cause_tunnel">Tunnel / underpass</string>
+    <string name="live_cause_cell_edge">Cell edge</string>
+    <string name="live_cause_late_handover">Late / failed handover</string>
+    <string name="live_cause_handover_churn">Handover churn</string>
+    <string name="live_cause_congestion">Congestion / backhaul</string>
+    <string name="live_cause_interference">Interference</string>
+    <string name="live_cause_wifi_weak">Weak Wi-Fi signal</string>
+    <string name="live_cause_sticky_client">Sticky client</string>
+    <string name="live_cause_channel_congestion">Wi-Fi channel congestion</string>
+    <string name="live_cause_wifi_uplink">Wi-Fi uplink</string>
+    <string name="live_cause_captive">Captive portal</string>
+    <string name="live_cause_dns">DNS issue</string>
+    <string name="live_cause_gateway">Carrier gateway change</string>
+
+    <!-- severity -->
+    <string name="live_sev_critical">Critical</string>
+    <string name="live_sev_warning">Warning</string>
+    <string name="live_sev_info">Info</string>
+
+    <!-- event detail sheet -->
+    <string name="live_detail_time">Time</string>
+    <string name="live_detail_position">Position</string>
+    <string name="live_detail_before_after">Before → after</string>
+    <string name="live_detail_likely_cause">Likely cause</string>
+    <string name="live_detail_no_cause">No cause above the confidence threshold</string>
+    <string name="live_detail_confidence">%1$s %%</string>
+    <string name="live_detail_evidence">Evidence</string>
+    <string name="live_detail_context">±30 s context</string>
+    <string name="live_detail_label">Label</string>
+    <string name="live_detail_label_hint">e.g. tunnel under Sheikh Zayed Rd</string>
+    <string name="live_detail_label_pending">Labels can be added once the event is saved (a few seconds).</string>
+    <string name="live_detail_save_label">Save label</string>
+
+    <!-- end-run summary -->
+    <string name="live_summary_title">Run complete</string>
+    <string name="live_summary_name">Run name</string>
+    <string name="live_summary_duration">DURATION</string>
+    <string name="live_summary_distance">DISTANCE</string>
+    <string name="live_summary_events">EVENTS</string>
+    <string name="live_summary_drops">DROPS</string>
+    <string name="live_summary_rsrp">RSRP median</string>
+    <string name="live_summary_latency">LATENCY median</string>
+    <string name="live_summary_loss">LOSS</string>
+    <string name="live_summary_mbps">THRU median</string>
+    <string name="live_summary_handovers">HANDOVERS</string>
+    <string name="live_summary_conn_share">Connection type share</string>
+    <string name="live_summary_replay">Replay</string>
+    <string name="live_summary_export">Export</string>
+    <string name="live_summary_save">Save</string>
+    <string name="live_summary_done">Done</string>
+    <string name="live_summary_error">Could not load the run: %1$s</string>
+
+    <!-- replay -->
+    <string name="live_replay_title">Replay</string>
+    <string name="live_replay_linked">⇄ %1$s</string>
+    <string name="live_replay_play">Play</string>
+    <string name="live_replay_prev">Previous event</string>
+    <string name="live_replay_next">Next event</string>
+    <string name="live_replay_rerun">Re-run rules with current thresholds</string>
+    <string name="live_replay_rerun_done">Rules re-run: %1$d events</string>
+    <string name="live_replay_worst">Worst segments</string>
+    <string name="live_replay_export">Export</string>
+    <string name="live_replay_hint">Drag to scrub · pinch to zoom time · tap an event dot for details</string>
+
+    <!-- worst segments -->
+    <string name="live_worst_title">Worst segments</string>
+    <string name="live_worst_window">Window</string>
+    <string name="live_worst_empty">No bad segments found in this run.</string>
+    <string name="live_worst_score">score %1$s</string>
+    <string name="live_worst_events">%1$d events</string>
+    <string name="live_reason_weak_rsrp">Weak RSRP</string>
+    <string name="live_reason_no_cell">No cell data</string>
+    <string name="live_reason_high_latency">High latency</string>
+    <string name="live_reason_loss">Packet loss</string>
+</resources>

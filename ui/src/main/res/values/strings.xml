@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings for :ui foundation screens (nav, onboarding, preflight, library, settings, transfer,
+     companion, common). Owned by the foundation UI; the live/replay UI keeps its own file. -->
+<resources>
+    <!-- common actions -->
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_close">Close</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_fix">Fix</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_save">Save</string>
+    <string name="action_share">Share</string>
+    <string name="share_chooser">Share run bundle</string>
+
+    <string name="readiness_ok">Ready</string>
+    <string name="readiness_warn">Check</string>
+    <string name="readiness_blocked">Blocked</string>
+    <string name="readiness_pending">Waiting</string>
+
+    <string name="unit_ms">ms</string>
+    <string name="unit_bytes">B</string>
+    <string name="unit_days">days</string>
+    <string name="unit_mb">MB</string>
+
+    <!-- navigation -->
+    <string name="nav_preflight">Pre-flight</string>
+    <string name="nav_runs">Runs</string>
+    <string name="nav_companion">Companion</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- onboarding -->
+    <string name="onboarding_title">Set up Tracer</string>
+    <string name="onboarding_intro">Tracer logs radio, Wi-Fi, GNSS and network quality on the move. Each permission below feeds one part of the log; nothing leaves the phone unless you export it.</string>
+    <string name="onboarding_allow">Allow</string>
+    <string name="onboarding_allow_all_time">Allow all the time</string>
+    <string name="onboarding_after_location">After location</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_required_hint">Precise location and phone state are required to record a run.</string>
+    <string name="onboarding_camera_note">Camera access is requested only when you scan a companion QR code.</string>
+    <string name="perm_location">Precise location</string>
+    <string name="perm_location_why">Positions every sample on the map. Android also requires it to read cell info and Wi-Fi scan results.</string>
+    <string name="perm_background">Location · Allow all the time</string>
+    <string name="perm_background_why">Keeps recording when the screen is off or another app is open. Android opens its settings page — choose “Allow all the time”, then come back.</string>
+    <string name="perm_phone">Phone state</string>
+    <string name="perm_phone_why">Reads active SIMs, 5G NR state and per-SIM radio technology. No calls or call logs are accessed.</string>
+    <string name="perm_nearby_wifi">Nearby Wi-Fi devices</string>
+    <string name="perm_nearby_wifi_why">Needed for Wi-Fi scans and access-point details. Scan results are used for location context, so this is not a “never for location” grant.</string>
+    <string name="perm_activity">Physical activity</string>
+    <string name="perm_activity_why">Tags samples as still, walking or in vehicle, so drops can be read against movement.</string>
+    <string name="perm_notifications">Notifications</string>
+    <string name="perm_notifications_why">Shows the live recording notification with Pause / End and alerts when a run stops by itself.</string>
+    <string name="perm_battery">Battery optimisation exemption</string>
+    <string name="perm_battery_why">Stops Android from throttling or killing a long recording. On Samsung also add Tracer to Settings › Battery › Background usage limits › Never sleeping apps.</string>
+
+    <!-- pre-flight -->
+    <string name="preflight_title">Pre-flight</string>
+    <string name="preflight_ready_badge">%1$d/%2$d READY</string>
+    <string name="preflight_setup">Run setup</string>
+    <string name="preflight_run_name">Run name</string>
+    <string name="preflight_default_name">Run %1$s</string>
+    <string name="mode_walk">Walk</string>
+    <string name="mode_car">Car</string>
+    <string name="mode_train">Train</string>
+    <string name="mode_custom">Custom</string>
+    <string name="preflight_sampling">Sampling</string>
+    <string name="preflight_probes">Probes</string>
+    <string name="preflight_wifi_scan">Wi-Fi scan</string>
+    <string name="preflight_hz">%1$s Hz</string>
+    <string name="preflight_every_s">every %1$s s</string>
+    <string name="preflight_interval_ms">Interval</string>
+    <string name="preflight_link_iphone">Link to iPhone run</string>
+    <string name="preflight_link_none">Scan the iPhone QR in Companion</string>
+    <string name="preflight_delta">Δt %1$s ms</string>
+    <string name="preflight_delta_unknown">Δt pending GPS</string>
+    <string name="preflight_battery_saver_sub">slower polling · longer runs</string>
+    <string name="preflight_simulate">Simulate run (debug)</string>
+    <string name="preflight_start">Start run</string>
+    <string name="preflight_blocked">Can’t start: grant precise location “all the time” and free up storage first.</string>
+
+    <string name="pf_permissions">Permissions</string>
+    <string name="pf_permissions_sub_always">%1$d/%2$d · all the time</string>
+    <string name="pf_permissions_sub_while">%1$d/%2$d · not all the time</string>
+    <string name="pf_gps">GPS lock</string>
+    <string name="pf_gps_sub">±%1$s m · %2$d sats</string>
+    <string name="pf_gps_searching">searching · %1$d visible</string>
+    <string name="pf_gps_off">location is off</string>
+    <string name="pf_gps_no_permission">no location permission</string>
+    <string name="pf_battery">Battery</string>
+    <string name="pf_battery_sub_unrestricted">%1$s %% · unrestricted</string>
+    <string name="pf_battery_sub_optimised">%1$s %% · optimised</string>
+    <string name="pf_storage">Storage</string>
+    <string name="pf_storage_sub">%1$s free</string>
+    <string name="pf_unknown">unknown</string>
+    <string name="pf_endpoints">Probe endpoints</string>
+    <string name="pf_endpoints_sub">%1$d/%2$d · %3$s ms</string>
+    <string name="pf_checking">checking…</string>
+    <string name="pf_companion">Companion</string>
+    <string name="pf_companion_none">not paired</string>
+    <string name="pf_companion_delta">Δt %1$s ms · GPS</string>
+    <string name="pf_companion_no_gps">Δt waiting for GPS</string>
+    <string name="pf_cell">Cell info API</string>
+    <string name="pf_cell_sub">%1$s Hz · %2$d SIM slots</string>
+    <string name="pf_cell_sub_nosim">%1$s Hz · no active SIM</string>
+    <string name="pf_cell_sub_unknown">%1$s Hz · SIMs unknown</string>
+    <string name="pf_wifi_throttle">Wi-Fi throttling</string>
+    <string name="pf_wifi_throttle_off">off · raw GNSS %1$s</string>
+    <string name="pf_wifi_throttle_on">on · Developer options › Wi-Fi scan throttling · raw GNSS %1$s</string>
+    <string name="pf_wifi_throttle_unknown">unknown · turn off in Developer options · raw GNSS %1$s</string>
+
+    <!-- runs library -->
+    <string name="library_search_hint">Search runs</string>
+    <string name="filter_all">All · %1$d</string>
+    <string name="filter_train">Train</string>
+    <string name="filter_linked">Linked</string>
+    <string name="filter_week">This week</string>
+    <string name="filter_drops">Has drops</string>
+    <string name="library_import">Import bundle</string>
+    <string name="library_export">Export…</string>
+    <string name="library_more">More options</string>
+    <string name="library_selected">%1$d selected · %2$s</string>
+    <string name="library_clear_selection">Clear selection</string>
+    <string name="library_delete_title">Delete %1$d run(s)?</string>
+    <string name="library_delete_text">Recorded samples, events and labels are removed from this phone. Exported bundles are not affected.</string>
+    <string name="library_deleted">Deleted %1$d run(s)</string>
+    <string name="library_empty">No runs yet. Start one from Pre-flight.</string>
+    <string name="library_no_match">No runs match.</string>
+    <string name="library_unfinished">recording</string>
+    <string name="library_today">Today %1$s</string>
+    <string name="library_yesterday">Yesterday %1$s</string>
+    <string name="library_linked_iphone">iPhone</string>
+    <string name="library_linked_android">Android</string>
+    <string name="library_recording_open">Recording — open Live</string>
+    <string name="library_paused_open">Paused — open Live</string>
+    <string name="library_retention_deleted">Removed %1$d run(s) older than %2$d days</string>
+    <string name="library_export_failed">Export failed: %1$s</string>
+    <string name="library_share_failed">Could not share the bundle</string>
+    <string name="library_import_ok">Imported “%1$s”</string>
+    <string name="library_import_linked">Imported “%1$s” · linked to “%2$s”</string>
+    <string name="library_import_integrity">Imported “%1$s” with %2$d integrity issue(s)</string>
+    <string name="library_import_failed">Import failed: %1$s</string>
+
+    <!-- companion -->
+    <string name="companion_this_device">This phone</string>
+    <string name="companion_qr_hint">Scan with Tracer on the iPhone to link both runs.</string>
+    <string name="companion_qr_after_start">The pairing QR for this phone appears once a run is recording.</string>
+    <string name="companion_partner">iPhone</string>
+    <string name="companion_start_on_iphone">Start on iPhone too? Start a run in Tracer on the iPhone, then scan its QR here — it is linked to this phone’s run when recording starts.</string>
+    <string name="companion_scan">Scan iPhone QR</string>
+    <string name="companion_invalid_qr">That QR code is not a Tracer pairing code.</string>
+    <string name="companion_link_pending">will be linked when the run starts</string>
+    <string name="companion_linked_ok">linked to the current run</string>
+    <string name="companion_linked_failed">linking failed: %1$s</string>
+    <string name="companion_clock">Clock</string>
+    <string name="companion_gps_offset">GPS − clock</string>
+    <string name="companion_gps_offset_sub">this phone</string>
+    <string name="companion_delta">Δt iPhone</string>
+    <string name="companion_delta_target">target &lt; 50 ms</string>
+    <string name="companion_linked_runs">Linked runs</string>
+    <string name="companion_no_linked">No linked runs yet.</string>
+    <string name="companion_imported">imported</string>
+
+    <!-- settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_range">%1$d – %2$d</string>
+    <string name="settings_section_intervals">Intervals</string>
+    <string name="settings_location_interval">Location</string>
+    <string name="settings_cell_interval">Cell poll</string>
+    <string name="settings_wifi_interval">Wi-Fi scan</string>
+    <string name="settings_latency_interval">Latency probe</string>
+    <string name="settings_adaptive_latency">Adaptive latency probing</string>
+    <string name="settings_adaptive_latency_desc">Probe faster while the link is degraded</string>
+    <string name="settings_throughput_interval">Throughput test</string>
+    <string name="settings_throughput_bytes">Throughput download size</string>
+    <string name="settings_public_ip_interval">Public IP check</string>
+    <string name="settings_device_interval">Device (battery, thermal)</string>
+    <string name="settings_section_collection">Collection</string>
+    <string name="settings_battery_saver">Battery saver</string>
+    <string name="settings_battery_saver_desc" formatted="false">Slower polling; switched on automatically at 15 % battery</string>
+    <string name="settings_raw_gnss">Raw GNSS measurements</string>
+    <string name="settings_raw_gnss_desc">Logs pseudoranges and clock (large)</string>
+    <string name="settings_fused">Fused location comparison</string>
+    <string name="settings_fused_desc">Also log the fused provider next to raw GPS</string>
+    <string name="settings_rtt">Wi-Fi RTT ranging</string>
+    <string name="settings_rtt_desc">802.11mc distance to capable access points</string>
+    <string name="settings_section_endpoints">Probe endpoints</string>
+    <string name="settings_endpoint_label">Label</string>
+    <string name="settings_endpoint_url">URL (https://…)</string>
+    <string name="settings_endpoint_add">Add endpoint</string>
+    <string name="settings_endpoint_remove">Remove %1$s</string>
+    <string name="settings_endpoint_invalid">Enter an http(s) URL</string>
+    <string name="settings_throughput_url">Throughput URL ({bytes} = size)</string>
+    <string name="settings_public_ip_url">Public IP URL</string>
+    <string name="settings_captive_url">Captive portal check URL</string>
+    <string name="settings_section_services">Services</string>
+    <string name="settings_opencellid_key">OpenCelliD API key</string>
+    <string name="settings_show_secret">Show key</string>
+    <string name="settings_hide_secret">Hide key</string>
+    <string name="settings_upload_url">Upload URL (optional, HTTPS)</string>
+    <string name="settings_section_storage">Storage</string>
+    <string name="settings_retention_days">Keep runs for</string>
+    <string name="settings_min_free_storage">Stop below free storage</string>
+    <string name="settings_section_thresholds">Event thresholds</string>
+    <string name="settings_thresholds_desc">Same snake_case JSON as the iOS app’s event_thresholds.json.</string>
+    <string name="settings_thresholds_apply">Apply</string>
+    <string name="settings_thresholds_reset">Reset to defaults</string>
+    <string name="settings_thresholds_applied">Applied to new runs</string>
+    <string name="settings_thresholds_not_object">Thresholds must be a JSON object</string>
+    <string name="settings_thresholds_invalid_json">Invalid JSON: %1$s</string>
+    <string name="settings_thresholds_unknown_keys">Unknown keys: %1$s</string>
+    <string name="settings_section_debug">Debug</string>
+    <string name="settings_sim_desc">Scenario used when “Simulate run” is switched on in Pre-flight.</string>
+    <string name="settings_sim_off">Off (commute)</string>
+
+    <!-- transfer -->
+    <string name="transfer_title">Export</string>
+    <string name="transfer_bundle">Bundle</string>
+    <string name="transfer_exporting">Exporting… %1$d %%</string>
+    <string name="transfer_failed">Export failed: %1$s</string>
+    <string name="transfer_upload">Upload</string>
+    <string name="transfer_uploading">Uploading…</string>
+    <string name="transfer_upload_status">Upload: HTTP %1$d</string>
+    <string name="transfer_upload_io">Upload failed (network)</string>
+    <string name="transfer_manifest">Manifest · %1$d files · %2$d rows</string>
+    <string name="transfer_rows">%1$d rows</string>
+</resources>
