@@ -69,6 +69,22 @@ Onboarding walks these in order, including the separate "Allow all the time" ste
 5. **NR state**: `nr_state` comes from `ServiceState.toString()`, which Samsung populates. Values can be null on other OEMs.
 6. **Dual SIM**: every cell/radio row carries `subscription_id`/`service_id`. Rules evaluate per subscription.
 
+## Install on a phone
+
+**Direct download (always the newest build):** open
+`https://github.com/daniel-jesse-a/tracer-android/releases/download/latest-debug/tracer-debug.apk`
+on the phone, then open the file and allow "Install unknown apps" for the browser when prompted. While the repo is private, sign in to GitHub in that browser first. Over USB: `adb install -r tracer-debug.apk`.
+
+Each CI build gets a higher `versionCode` and the same signing key, so new builds install over old ones and keep your runs.
+
+| device | Android | notes |
+|---|---|---|
+| Galaxy S25 | 15 / 16 (One UI 7/8) | see Samsung notes below; `*#0011#` ServiceMode for cross-checks |
+| Pixel 6 Pro | 13–16 (Tensor G1, Exynos 5123 modem) | dual-SIM (pSIM + eSIM). Cross-check with `*#*#4636#*#*` › Phone information. `nr_state` may be null (Pixel's `ServiceState.toString` omits it); the RAT still comes from display info |
+| Pixel 10 Pro | 16 (Tensor G5) | APK is verified **16 KB page-size compatible** in CI (Android 16 can run with 16 KB pages); same cross-check code as Pixel 6 Pro |
+
+Pixel battery: *Settings › Apps › Tracer › App battery usage › Unrestricted*. Wi-Fi scan throttling: *Settings › System › Developer options › Wi-Fi scan throttling* off (enable Developer options by tapping *About phone › Build number* ×7). The APK contains arm64-v8a (all three phones) and x86_64 (emulator) native libraries.
+
 ## Event rules and causes
 
 Thresholds are JSON (`core/src/main/resources/event_thresholds.default.json`, keys identical on iOS) and editable in Settings. Replay can re-run all rules with edited thresholds.

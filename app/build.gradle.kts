@@ -22,8 +22,12 @@ android {
         applicationId = "app.tracer"
         minSdk = rootProject.extra["tracer.minSdk"] as Int
         targetSdk = rootProject.extra["tracer.targetSdk"] as Int
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI run number → monotonically increasing versionCode, so every build installs as an upgrade.
+        val ciBuild = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = ciBuild
+        versionName = "1.0.$ciBuild"
+        // Pixel 6 Pro / Pixel 10 Pro / Galaxy S25 are arm64; x86_64 keeps emulators working.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "app.tracer.HiltTestRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsKey
         manifestPlaceholders["MAP_BACKEND"] = if (mapsKey.isBlank()) "maplibre" else mapBackend
@@ -64,7 +68,11 @@ android {
         compose = true
         buildConfig = true
     }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Store native libs uncompressed + page-aligned (required for 16 KB page-size devices, Android 15+).
+        jniLibs.useLegacyPackaging = false
+    }
     lint { warningsAsErrors = false; abortOnError = true; checkDependencies = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
 }

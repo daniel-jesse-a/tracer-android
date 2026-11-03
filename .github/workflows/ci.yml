@@ -3,6 +3,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write   # publish the APK to the "latest-debug" release
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,9 +26,28 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with: { name: build-log, path: build-log.txt }
-      - name: Upload APK
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/tracer-debug.apk
+      - name: 16 KB page-size compatibility (Android 15+ / Pixel)
+        run: tools/check-16kb.sh dist/tracer-debug.apk
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
-        with: { name: tracer-debug-apk, path: app/build/outputs/apk/debug/*.apk }
+        with: { name: tracer-debug-apk, path: dist/tracer-debug.apk }
+      - name: Publish to "latest-debug" release (stable download link)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="Debug build 1.0.${{ github.run_number }} from ${GITHUB_SHA::7}. Install: download tracer-debug.apk on the phone and open it. Works on Android 12+ (arm64): Pixel 6 Pro, Pixel 10 Pro, Galaxy S25."
+          if ! gh release view latest-debug >/dev/null 2>&1; then
+            gh release create latest-debug --prerelease --title "Tracer — latest debug build" --notes "$NOTES" --target "$GITHUB_SHA"
+          else
+            gh release edit latest-debug --notes "$NOTES" --title "Tracer — latest debug build (1.0.${{ github.run_number }})"
+            git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA:refs/tags/latest-debug"
+          fi
+          gh release upload latest-debug dist/tracer-debug.apk --clobber
 
   checks:
     name: Unit tests + lint
