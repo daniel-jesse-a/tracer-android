@@ -1,0 +1,10 @@
+{"description":"NR SA n78 serving (SS values) and NSA NR leg reporting only CSI values; nci = UNAVAILABLE_LONG",
+ "nowMonoNs": 9000000000000,
+ "cells":[
+  {"type":"NR","registered":true,"timestampNanos":8998000000000,"mcc":"424","mnc":"03","tac":700123,"cid":34393178114,"pci":512,"arfcn":636666,"bands":[],"bandwidthKhz":100000,"ssRsrp":-88,"ssRsrq":-11,"ssSinr":17,"csiRsrp":2147483647,"csiRsrq":2147483647,"csiSinr":2147483647,"nrTimingAdvanceMicros":4},
+  {"type":"NR","registered":false,"timestampNanos":8998000000000,"cid":9223372036854775807,"pci":77,"arfcn":627264,"bands":[78],"ssRsrp":2147483647,"ssRsrq":2147483647,"ssSinr":2147483647,"csiRsrp":-101,"csiRsrq":-13,"csiSinr":5}
+ ],
+ "expect":[
+  {"serving":true,"rat":"NR","cell_id":34393178114,"pci":512,"band":"n78","bandwidth_mhz":100.0,"rsrp":-88,"rsrq":-11,"sinr":17,"timing_advance":4,"cellinfo_age_ms":2000},
+  {"serving":false,"rat":"NR","cell_id":null,"pci":77,"band":"n78","bandwidth_mhz":null,"rsrp":-101,"rsrq":-13,"sinr":5,"timing_advance":null,"cellinfo_age_ms":2000}
+ ]}

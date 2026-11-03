@@ -1,0 +1,10 @@
+{"description":"WCDMA B1 serving with RSCP/EcNo; GSM neighbour",
+ "nowMonoNs": 9000000000000,
+ "cells":[
+  {"type":"WCDMA","registered":true,"timestampNanos":8999000000000,"mcc":"424","mnc":"02","tac":321,"cid":47712301,"pci":411,"arfcn":10737,"rscp":-93,"ecNo":-9,"rssi":2147483647},
+  {"type":"GSM","registered":false,"timestampNanos":8999000000000,"tac":321,"cid":4011,"pci":21,"arfcn":62,"rssi":-85,"timingAdvance":2147483647}
+ ],
+ "expect":[
+  {"serving":true,"rat":"WCDMA","cell_id":47712301,"pci":411,"band":"U1","bandwidth_mhz":null,"rsrp":-93,"rsrq":-9,"sinr":null,"timing_advance":null,"cellinfo_age_ms":1000},
+  {"serving":false,"rat":"GSM","cell_id":4011,"pci":21,"band":null,"bandwidth_mhz":null,"rsrp":null,"rsrq":null,"sinr":null,"timing_advance":null,"cellinfo_age_ms":1000}
+ ]}

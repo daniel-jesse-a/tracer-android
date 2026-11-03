@@ -1,0 +1,10 @@
+{"description":"Galaxy S25 LTE B3 serving + one neighbour, UNAVAILABLE sentinels on neighbour",
+ "nowMonoNs": 9000000000000,
+ "cells":[
+  {"type":"LTE","registered":true,"timestampNanos":8999700000000,"mcc":"424","mnc":"02","tac":10110,"cid":21500929,"pci":187,"arfcn":1650,"bands":[3],"bandwidthKhz":20000,"rsrp":-97,"rsrq":-11,"rssi":-67,"rssnr":9,"cqi":11,"timingAdvance":7},
+  {"type":"LTE","registered":false,"timestampNanos":8999700000000,"mcc":null,"mnc":null,"tac":2147483647,"cid":2147483647,"pci":344,"arfcn":1650,"bands":[],"bandwidthKhz":2147483647,"rsrp":-104,"rsrq":-15,"rssi":2147483647,"rssnr":2147483647,"cqi":2147483647,"timingAdvance":2147483647}
+ ],
+ "expect":[
+  {"serving":true,"rat":"LTE","cell_id":21500929,"pci":187,"band":"B3","bandwidth_mhz":20.0,"rsrp":-97,"rsrq":-11,"sinr":9,"timing_advance":7,"cellinfo_age_ms":300},
+  {"serving":false,"rat":"LTE","cell_id":null,"pci":344,"band":"B3","bandwidth_mhz":null,"rsrp":-104,"rsrq":-15,"sinr":null,"timing_advance":null,"cellinfo_age_ms":300}
+ ]}
