@@ -1,0 +1,26 @@
+Tests
+Test 3 vs Test 1
+48%
+97%
+checks passed
+False drops 4 → 0
+GPS fixes 0 → 88
+TODAY · OFFICE
+Test 3
+18:28
+3:12 · walking
+Very good
+›
+Test 2
+earlier
+Pixel 10 Pro
+View
+›
+Test 1
+earlier
+6:06 · old build
+Below avg
+›
+Tests
+New test
+Settings

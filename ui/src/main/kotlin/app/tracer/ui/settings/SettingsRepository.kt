@@ -73,6 +73,32 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    // ---- design v2 UI preferences
+
+    /** "light" | "dark" | "auto" (default dark, as the design). */
+    val themeMode: Flow<String> = safeData.map { it[KEY_THEME] ?: "dark" }.distinctUntilChanged()
+    suspend fun setThemeMode(mode: String) { store.edit { it[KEY_THEME] = mode } }
+
+    /** Engineer view: shows the detailed panels, replay, raw numbers and the run library actions. */
+    val engineerView: Flow<Boolean> = safeData.map { it[KEY_ENGINEER] == "1" }.distinctUntilChanged()
+    suspend fun setEngineerView(on: Boolean) { store.edit { it[KEY_ENGINEER] = if (on) "1" else "0" } }
+
+    /** Test defaults: networks "dual" | "wifi" | "cellular"; length minutes (0 = no limit); movement walk|drive|rail|static. */
+    val defaultNetworks: Flow<String> = safeData.map { it[KEY_NETWORKS] ?: "dual" }.distinctUntilChanged()
+    suspend fun setDefaultNetworks(v: String) { store.edit { it[KEY_NETWORKS] = v } }
+    val defaultLengthMin: Flow<Int> = safeData.map { it[KEY_LENGTH]?.toIntOrNull() ?: 10 }.distinctUntilChanged()
+    suspend fun setDefaultLengthMin(v: Int) { store.edit { it[KEY_LENGTH] = v.toString() } }
+    val defaultMovement: Flow<String> = safeData.map { it[KEY_MOVEMENT] ?: "walk" }.distinctUntilChanged()
+    suspend fun setDefaultMovement(v: String) { store.edit { it[KEY_MOVEMENT] = v } }
+
+    /** "Start tests on all companions". */
+    val startCompanions: Flow<Boolean> = safeData.map { it[KEY_START_COMPANIONS] != "0" }.distinctUntilChanged()
+    suspend fun setStartCompanions(on: Boolean) { store.edit { it[KEY_START_COMPANIONS] = if (on) "1" else "0" } }
+
+    /** Welcome screen finished at least once. */
+    val welcomed: Flow<Boolean> = safeData.map { it[KEY_WELCOMED] == "1" }.distinctUntilChanged()
+    suspend fun setWelcomed() { store.edit { it[KEY_WELCOMED] = "1" } }
+
     private fun decode(json: String?): RunSettings =
         json?.let { runCatching { RunSettings.fromJson(it) }.onFailure { e -> Log.w(TAG, "corrupt settings json", e) }.getOrNull() }
             ?: RunSettings()
@@ -82,5 +108,12 @@ class SettingsRepository @Inject constructor(
         val KEY_SETTINGS = stringPreferencesKey("run_settings_json")
         val KEY_SIM = stringPreferencesKey("debug_sim_scenario")
         val KEY_LAST_SITE = stringPreferencesKey("last_site")
+        val KEY_THEME = stringPreferencesKey("ui_theme_mode")
+        val KEY_ENGINEER = stringPreferencesKey("ui_engineer_view")
+        val KEY_NETWORKS = stringPreferencesKey("ui_default_networks")
+        val KEY_LENGTH = stringPreferencesKey("ui_default_length_min")
+        val KEY_MOVEMENT = stringPreferencesKey("ui_default_movement")
+        val KEY_START_COMPANIONS = stringPreferencesKey("ui_start_companions")
+        val KEY_WELCOMED = stringPreferencesKey("ui_welcomed")
     }
 }

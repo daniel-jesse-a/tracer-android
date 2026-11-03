@@ -1,0 +1,20 @@
+‹ Live
+Signals
+Mobile data
+Above avg
+4G · −83 dBm
+Weak
+Strong
+Band 3 · SINR 25 dB · 5G seen
+Wi-Fi
+Bad
+−90 dBm
+Weak
+Strong
+ER-Mobile · a closer access point is available
+Location
+Average
+±10 m · no GPS
+Rough
+Precise
+Indoors · 0 satellites · using Wi-Fi

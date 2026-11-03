@@ -1,0 +1,28 @@
+Office · Test 4
+01:24 / 10:00
+Online via mobile data
+
+Wi-Fi too weak since 01:00
+
+You · ±10 m
+Wi-Fi
+−90 dBm
+Bad
+Mobile data
+4G · in use
+Above avg
+Response
+136 ms
+Above avg
+Position
+±10 m
+Average
+So far
+1 switch · 1 Wi-Fi hop
+01:00
+Switched to mobile data
+00:42
+Changed access point
+Mark
+Pause
+Finish

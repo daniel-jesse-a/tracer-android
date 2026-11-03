@@ -1,0 +1,20 @@
+‹ Summary
+3 of 4
+1:00 · lasted 75 s
+Wi-Fi dropped
+You stayed online
+Before
+Wi-Fi
+Bad
+→
+After
+Mobile
+Above avg
+Wi-Fi strength
+±30 s
+Likely cause
+Held a far access point
+sticky client · RSSI −90 dBm · stronger AP in scan
+Is this right?
+Yes
+No, change

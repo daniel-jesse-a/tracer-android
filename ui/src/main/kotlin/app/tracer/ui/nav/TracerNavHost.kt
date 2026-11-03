@@ -1,31 +1,25 @@
 package app.tracer.ui.nav
 
-import androidx.annotation.StringRes
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
-import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,56 +32,79 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.tracer.core.model.RunState
 import app.tracer.core.runtime.RunController
-import app.tracer.ui.R
-import app.tracer.ui.companion.CompanionScreen
+import app.tracer.ui.companion.CompanionsScreen
+import app.tracer.ui.diagnostics.DiagnosticsScreen
+import app.tracer.ui.kit.tc
 import app.tracer.ui.library.RunLibraryScreen
 import app.tracer.ui.live.LiveRunRoute
-import app.tracer.ui.onboarding.OnboardingScreen
+import app.tracer.ui.moment.MomentScreen
+import app.tracer.ui.newtest.NewTestScreen
 import app.tracer.ui.onboarding.Permissions
-import app.tracer.ui.preflight.PreflightScreen
 import app.tracer.ui.replay.ReplayRoute
+import app.tracer.ui.settings.SettingsRepository
 import app.tracer.ui.settings.SettingsScreen
-import app.tracer.ui.summary.EndRunSummaryRoute
+import app.tracer.ui.share.ShareScreen
+import app.tracer.ui.signals.SignalsScreen
+import app.tracer.ui.summary.TestSummaryScreen
+import app.tracer.ui.tests.TestsScreen
+import app.tracer.ui.theme.TType
 import app.tracer.ui.transfer.TransferScreen
+import app.tracer.ui.welcome.WelcomeScreen
 import app.tracer.ui.worst.WorstSegmentsRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
-/** Route names (string routes, Navigation-Compose 2.9). */
+/**
+ * Design v2 navigation.
+ *
+ *  Welcome → Tests (tab) ─┬─ New test (tab, full screen) → Live → Signals
+ *                         │                                 └→ Test summary
+ *                         └─ Test summary → Diagnostics (Simple | Detailed) → Moment detail
+ *                                        └→ Share
+ *  Settings (tab) → Companions · (engineer view) All runs / Replay / Worst segments / Transfer
+ */
 object Routes {
-    const val ONBOARDING = "onboarding"
-    const val PREFLIGHT = "preflight"
+    const val WELCOME = "welcome"
+    const val TESTS = "tests"
+    const val NEW_TEST = "newtest"
+    const val SETTINGS = "settings"
     const val LIVE = "live"
+    const val SIGNALS = "signals"
     const val SUMMARY = "summary/{runId}"
+    const val DIAGNOSTICS = "diagnostics/{runId}"
+    const val MOMENT = "moment/{runId}/{index}"
+    const val SHARE = "share/{runId}"
+    const val COMPANIONS = "companions"
+    // engineer view
     const val LIBRARY = "library"
     const val REPLAY = "replay/{runId}?atMonoNs={atMonoNs}"
     const val WORST = "worst/{runId}"
     const val TRANSFER = "transfer/{runId}"
-    const val SETTINGS = "settings"
-    const val COMPANION = "companion"
 
     fun summary(runId: String) = "summary/$runId"
+    fun diagnostics(runId: String) = "diagnostics/$runId"
+    fun moment(runId: String, index: Int) = "moment/$runId/$index"
+    fun share(runId: String) = "share/$runId"
     fun replay(runId: String, atMonoNs: Long? = null) = if (atMonoNs == null) "replay/$runId" else "replay/$runId?atMonoNs=$atMonoNs"
     fun worst(runId: String) = "worst/$runId"
     fun transfer(runId: String) = "transfer/$runId"
 }
 
 @HiltViewModel
-class NavViewModel @Inject constructor(val controller: RunController) : ViewModel()
+class NavViewModel @Inject constructor(val controller: RunController, val settings: SettingsRepository) : ViewModel()
 
-private data class Tab(val route: String, @StringRes val label: Int, val icon: ImageVector)
+private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val TABS = listOf(
-    Tab(Routes.PREFLIGHT, R.string.nav_preflight, Icons.Outlined.Home),
-    Tab(Routes.LIBRARY, R.string.nav_runs, Icons.AutoMirrored.Outlined.List),
-    Tab(Routes.COMPANION, R.string.nav_companion, Icons.Outlined.Devices),
-    Tab(Routes.SETTINGS, R.string.nav_settings, Icons.Outlined.Settings),
+    Tab(Routes.TESTS, "Tests", Icons.AutoMirrored.Outlined.List),
+    Tab(Routes.NEW_TEST, "New test", Icons.Outlined.Add),
+    Tab(Routes.SETTINGS, "Settings", Icons.Outlined.Settings),
 )
+private val TAB_ROOTS = setOf(Routes.TESTS, Routes.SETTINGS)
 
 /**
- * App navigation. Bottom NavigationBar (Pre-flight · Runs · Companion · Settings) on top-level
- * routes; Live Run and detail screens are full-screen.
- *
  * @param startOnLive opened from the run notification
  * @param openLiveSignal incremented by MainActivity when the notification is tapped while alive
  */
@@ -96,13 +113,15 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
     val context = LocalContext.current
     val nav = rememberNavController()
     val runState by viewModel.controller.state.collectAsStateWithLifecycle()
-    val start = remember { if (Permissions.hasRequired(context)) Routes.PREFLIGHT else Routes.ONBOARDING }
+    val start = remember {
+        val welcomed = runBlocking { viewModel.settings.welcomed.first() }
+        if (Permissions.hasRequired(context) && welcomed) Routes.TESTS else Routes.WELCOME
+    }
     var handledInitialLive by rememberSaveable { mutableStateOf(false) }
     val active = runState == RunState.RECORDING || runState == RunState.PAUSED
 
-    // jump to Live once at launch when a run is active (or the notification asked for it)
     LaunchedEffect(active, startOnLive) {
-        if (!handledInitialLive && (active || startOnLive) && start != Routes.ONBOARDING) {
+        if (!handledInitialLive && (active || startOnLive) && start != Routes.WELCOME) {
             handledInitialLive = true
             if (active) nav.navigate(Routes.LIVE) { launchSingleTop = true }
         }
@@ -115,68 +134,106 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
 
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
-    val showBar = TABS.any { it.route == currentRoute }
+    val showBar = currentRoute in TAB_ROOTS
+    val goLive = { nav.navigate(Routes.LIVE) { launchSingleTop = true } }
+    val newTest = { if (active) goLive() else nav.navigate(Routes.NEW_TEST) { launchSingleTop = true } }
 
     Scaffold(
+        containerColor = tc.bg,
         contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
         bottomBar = {
-            if (showBar) {
-                NavigationBar {
-                    TABS.forEach { tab ->
-                        NavigationBarItem(
-                            selected = currentRoute == tab.route,
-                            onClick = { nav.navigateTab(tab.route) },
-                            icon = { Icon(tab.icon, contentDescription = null) },
-                            label = { Text(stringResource(tab.label)) },
-                        )
-                    }
-                }
+            if (showBar) TabBar(currentRoute) { route ->
+                if (route == Routes.NEW_TEST) newTest() else nav.navigateTab(route)
             }
         },
     ) { padding ->
         NavHost(
             navController = nav,
             startDestination = start,
-            modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+            modifier = Modifier.padding(padding).consumeWindowInsets(padding).background(tc.bg),
         ) {
-            composable(Routes.ONBOARDING) {
-                OnboardingScreen(onDone = {
-                    if (nav.previousBackStackEntry != null) {
-                        nav.popBackStack()
-                    } else {
-                        nav.navigate(Routes.PREFLIGHT) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
-                    }
+            composable(Routes.WELCOME) {
+                WelcomeScreen(onDone = {
+                    if (nav.previousBackStackEntry != null) nav.popBackStack()
+                    else nav.navigate(Routes.TESTS) { popUpTo(Routes.WELCOME) { inclusive = true } }
                 })
             }
-            composable(Routes.PREFLIGHT) {
-                PreflightScreen(
-                    onStarted = { nav.navigate(Routes.LIVE) { launchSingleTop = true } },
-                    onFixPermissions = { nav.navigate(Routes.ONBOARDING) },
-                    onOpenCompanion = { nav.navigateTab(Routes.COMPANION) },
+            composable(Routes.TESTS) {
+                TestsScreen(
+                    onOpenTest = { id -> nav.navigate(Routes.summary(id)) },
+                    onNewTest = newTest,
+                    onOpenLive = goLive,
+                )
+            }
+            composable(Routes.NEW_TEST) {
+                NewTestScreen(
+                    onCancel = { nav.popBackStack() },
+                    onStarted = { nav.navigate(Routes.LIVE) { popUpTo(Routes.NEW_TEST) { inclusive = true }; launchSingleTop = true } },
+                    onFixPermissions = { nav.navigate(Routes.WELCOME) },
+                    onOpenCompanions = { nav.navigate(Routes.COMPANIONS) },
                 )
             }
             composable(Routes.LIVE) {
                 LiveRunRoute(
-                    onRunEnded = { runId ->
-                        nav.navigate(Routes.summary(runId)) { popUpTo(Routes.LIVE) { inclusive = true } }
-                    },
+                    onRunEnded = { runId -> nav.navigate(Routes.summary(runId)) { popUpTo(Routes.LIVE) { inclusive = true } } },
+                    onOpenSignals = { nav.navigate(Routes.SIGNALS) },
                     onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 )
             }
-            composable(Routes.SUMMARY, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { entry ->
-                val runId = entry.arguments?.getString("runId").orEmpty()
-                EndRunSummaryRoute(
-                    runId = runId,
-                    onDone = { nav.navigateTab(Routes.LIBRARY) },
-                    onOpenReplay = { id -> nav.navigate(Routes.replay(id)) },
-                    onExport = { id -> nav.navigate(Routes.transfer(id)) },
+            composable(Routes.SIGNALS) { SignalsScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.SUMMARY, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
+                val id = e.arguments?.getString("runId").orEmpty()
+                TestSummaryScreen(
+                    runId = id,
+                    onBack = { if (!nav.popBackStack(Routes.TESTS, false)) nav.navigate(Routes.TESTS) { popUpTo(0) } },
+                    onShare = { nav.navigate(Routes.share(id)) },
+                    onDiagnostics = { nav.navigate(Routes.diagnostics(id)) },
+                    onMoment = { i -> nav.navigate(Routes.moment(id, i)) },
                 )
             }
+            composable(Routes.DIAGNOSTICS, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
+                val id = e.arguments?.getString("runId").orEmpty()
+                DiagnosticsScreen(
+                    runId = id,
+                    onBack = { nav.popBackStack() },
+                    onShare = { nav.navigate(Routes.share(id)) },
+                    onMoment = { i -> nav.navigate(Routes.moment(id, i)) },
+                    onReplay = { mono -> nav.navigate(Routes.replay(id, mono)) },
+                    onWorst = { nav.navigate(Routes.worst(id)) },
+                )
+            }
+            composable(
+                Routes.MOMENT,
+                arguments = listOf(navArgument("runId") { type = NavType.StringType }, navArgument("index") { type = NavType.IntType }),
+            ) { e ->
+                val id = e.arguments?.getString("runId").orEmpty()
+                MomentScreen(
+                    runId = id,
+                    index = e.arguments?.getInt("index") ?: 0,
+                    onBack = { nav.popBackStack() },
+                    onOpenIndex = { i -> nav.navigate(Routes.moment(id, i)) { popUpTo(Routes.MOMENT) { inclusive = true } } },
+                )
+            }
+            composable(Routes.SHARE, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
+                ShareScreen(runId = e.arguments?.getString("runId").orEmpty(), onCancel = { nav.popBackStack() })
+            }
+            composable(Routes.SETTINGS) {
+                val pushed = nav.previousBackStackEntry?.destination?.route == Routes.LIVE
+                SettingsScreen(
+                    onBack = if (pushed) ({ nav.popBackStack(); Unit }) else null,
+                    onOpenCompanions = { nav.navigate(Routes.COMPANIONS) },
+                    onOpenLibrary = { nav.navigate(Routes.LIBRARY) },
+                )
+            }
+            composable(Routes.COMPANIONS) {
+                CompanionsScreen(onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate(Routes.summary(id)) })
+            }
+            // ---- engineer view
             composable(Routes.LIBRARY) {
                 RunLibraryScreen(
                     onOpenRun = { id -> nav.navigate(Routes.replay(id)) },
                     onExport = { id -> nav.navigate(Routes.transfer(id)) },
-                    onOpenLive = { nav.navigate(Routes.LIVE) { launchSingleTop = true } },
+                    onOpenLive = goLive,
                 )
             }
             composable(
@@ -185,41 +242,53 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
                     navArgument("runId") { type = NavType.StringType },
                     navArgument("atMonoNs") { type = NavType.StringType; nullable = true; defaultValue = null },
                 ),
-            ) { entry ->
+            ) { e ->
                 ReplayRoute(
-                    runId = entry.arguments?.getString("runId").orEmpty(),
-                    atMonoNs = entry.arguments?.getString("atMonoNs")?.toLongOrNull(),
+                    runId = e.arguments?.getString("runId").orEmpty(),
+                    atMonoNs = e.arguments?.getString("atMonoNs")?.toLongOrNull(),
                     onBack = { nav.popBackStack() },
                     onWorstSegments = { id -> nav.navigate(Routes.worst(id)) },
-                    onExport = { id -> nav.navigate(Routes.transfer(id)) },
+                    onExport = { id -> nav.navigate(Routes.share(id)) },
                 )
             }
-            composable(Routes.WORST, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { entry ->
+            composable(Routes.WORST, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
                 WorstSegmentsRoute(
-                    runId = entry.arguments?.getString("runId").orEmpty(),
+                    runId = e.arguments?.getString("runId").orEmpty(),
                     onBack = { nav.popBackStack() },
                     onOpenAt = { id, mono -> nav.navigate(Routes.replay(id, mono)) },
                 )
             }
-            composable(Routes.TRANSFER, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { entry ->
-                TransferScreen(runId = entry.arguments?.getString("runId").orEmpty(), onBack = { nav.popBackStack() })
-            }
-            composable(Routes.SETTINGS) {
-                // as a tab there is nothing to go back to; pushed from Live it shows a back arrow
-                val pushed = nav.previousBackStackEntry?.destination?.route == Routes.LIVE
-                SettingsScreen(onBack = if (pushed) ({ nav.popBackStack(); Unit }) else null)
-            }
-            composable(Routes.COMPANION) {
-                CompanionScreen(onOpenRun = { id -> nav.navigate(Routes.replay(id)) })
+            composable(Routes.TRANSFER, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
+                TransferScreen(runId = e.arguments?.getString("runId").orEmpty(), onBack = { nav.popBackStack() })
             }
         }
     }
 }
 
-/** Standard bottom-nav navigation: single top, state saved/restored, rooted at Pre-flight. */
+/** Design tab bar: hairline on top, icon over label, blue when selected. */
+@Composable
+private fun TabBar(current: String?, onSelect: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(if (tc.dark) androidx.compose.ui.graphics.Color(0xF0121214) else tc.card)) {
+        HorizontalDivider(thickness = 0.5.dp, color = tc.sep)
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp)) {
+            TABS.forEach { tab ->
+                val sel = current == tab.route
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().clickable { onSelect(tab.route) },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(tab.icon, null, tint = if (sel) tc.link else tc.text3, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.height(2.dp))
+                    Text(tab.label, style = TType.footnote.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = if (sel) tc.link else tc.text3)
+                }
+            }
+        }
+    }
+}
+
 private fun NavHostController.navigateTab(route: String) {
     navigate(route) {
-        popUpTo(Routes.PREFLIGHT) { saveState = true }
+        popUpTo(Routes.TESTS) { saveState = true }
         launchSingleTop = true
         restoreState = true
     }

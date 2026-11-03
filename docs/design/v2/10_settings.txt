@@ -1,0 +1,35 @@
+Settings
+Light
+Dark
+Auto
+TEST DEFAULTS
+Networks
+Wi-Fi + mobile
+›
+Length
+10 min
+›
+Movement
+Walk
+›
+DATA & BATTERY
+Speed test size
+10 MB
+›
+Battery saver
+COMPANIONS
+Devices
+2 linked
+›
+ADVANCED
+Engineer view
+Check intervals
+2 s
+›
+Test servers
+3
+›
+ABOUT
+Version
+1.0.13
+›

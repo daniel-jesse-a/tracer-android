@@ -1,0 +1,48 @@
+‹ Tests
+Share
+Office · Test 3 · 3:12
+Stayed online
+100%
+online
+Wi-Fi dipped. Mobile data covered 95 s.
+Wi-Fi speed
+333 Mbps
+Very good
+Mobile speed
+167 Mbps
+Very good
+Response
+≤136 ms
+Above avg
+Stability
+4 switches
+Below avg
+Timeline
+Wi-Fi
+Mobile
+0:00
+1:00
+2:35
+3:12
+Changed access point
+0:42
+›
+No GPS indoors
+0:45
+›
+Wi-Fi dropped
+1:00
+›
+Back on Wi-Fi
+2:35
+›
+Test quality
+Above avg
+Checks passed
+97%
+Positions
+88
+On schedule
+51%
+Full diagnostics
+Share report

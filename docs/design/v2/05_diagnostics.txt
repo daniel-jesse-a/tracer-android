@@ -1,0 +1,62 @@
+‹ Summary
+Share
+Office · Test 3 · 3:12
+Diagnostics
+Simple
+Detailed
+Online
+Very good
+100%
+Wi-Fi signal
+Bad
+−90
+Mobile signal
+Above avg
+−83
+Download
+Very good
+333
+Response
+Above avg
+≤136
+Position
+Average
+±10 m
+Test quality
+Average
+97%
+Network
+Wi-Fi
+Mobile
+0:00
+1:00
+2:00
+3:12
+Wi-Fi strength
+○ = new access point
+Strong
+OK
+Weak
+0:00
+1:00
+2:00
+3:12
+Response time
+mobile · 92–136 ms
+150 ms
+Speed tests
+Wi-Fi
+42
+Wi-Fi
+383
+Wi-Fi
+333
+Mobile
+94
+Mobile
+167
+Mbps · 4 s each
+Movement
+Position ±10 m · Wi-Fi
+Walking 58%
+Still 42%
