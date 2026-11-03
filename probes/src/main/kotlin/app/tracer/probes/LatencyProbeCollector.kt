@@ -1,5 +1,7 @@
 package app.tracer.probes
 
+import kotlinx.coroutines.async
+import android.os.SystemClock
 import app.tracer.core.config.RunSettings
 import app.tracer.core.model.ProbeSample
 import app.tracer.core.model.Sample
@@ -34,19 +36,22 @@ class LatencyProbeCollector @Inject constructor(
         try {
             while (isActive) {
                 ctx.signals.awaitResumed()
+                val startedMs = SystemClock.elapsedRealtime()
                 val default = networks.current()
+                // Dual path: while Wi-Fi is the default, measure the mobile-data path concurrently
+                // (sequential sets stretched a 2 s cadence to ~5 s in "Office test 3").
+                val cell = if (settings.dualPathProbing && default?.isCellular != true) networks.cellularIfNotDefault() else null
+                val cellJob = cell?.let { c -> async { runSet(ctx, settings, c) } }
                 for (sample in runSet(ctx, settings, default)) {
                     send(sample)
                     ctx.status.sample(id, sample.stamp.tMonoNs)
                     recent.addLast(if (sample.success) sample.connectMs ?: sample.totalMs else null)
                     while (recent.size > 10) recent.removeFirst()
                 }
-                // Dual path: while Wi-Fi is the default, also measure the mobile-data path.
-                if (settings.dualPathProbing && default?.isCellular != true) {
-                    networks.cellularIfNotDefault()?.let { cell -> for (sample in runSet(ctx, settings, cell)) send(sample) }
-                }
+                cellJob?.await()?.forEach { send(it) }
                 interval = nextLatencyIntervalMs(base, interval, ctx.signals.degraded.value, settings.adaptiveLatency, recent.toList())
-                delay(interval)
+                // start-to-start cadence: subtract the time the sets themselves took
+                delay((interval - (SystemClock.elapsedRealtime() - startedMs)).coerceAtLeast(MIN_GAP_MS))
             }
         } finally {
             if (settings.dualPathProbing) networks.releaseCellular()
@@ -91,5 +96,10 @@ class LatencyProbeCollector @Inject constructor(
                 )
             }
         }
+    }
+
+    private companion object {
+        /** Never probe back-to-back: at least this much idle between sets even when a set overran. */
+        const val MIN_GAP_MS = 250L
     }
 }

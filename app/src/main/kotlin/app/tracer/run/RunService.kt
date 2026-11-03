@@ -671,7 +671,8 @@ class RunService : LifecycleService() {
         val wifiScans = repository.samples(runId, Table.WIFI_SCAN).filterIsInstance<WifiScanSample>().map { it.scanId }.distinct().size.toLong()
         val latencyProbes = repository.samples(runId, Table.PROBE).count { it is ProbeSample && it.probeType == "latency" }.toLong()
         val observed = mapOf(
-            "location" to locations.count { it.provider == "gps" }.toLong(),
+            // positions from any provider (raw GPS or fused indoors); GNSS health is scored by gnss_epochs
+            "location" to locations.map { it.stamp.tMonoNs / 1_000_000_000L }.distinct().size.toLong(),
             // ~10 satellites per epoch; avoids loading every satellite row of a long run
             "gnss_epochs" to (counts[Table.GNSS_SATELLITE] ?: 0L) / GNSS_ROWS_PER_EPOCH,
             "cell_serving_polls" to (counts[Table.CELL_SERVING] ?: 0L),

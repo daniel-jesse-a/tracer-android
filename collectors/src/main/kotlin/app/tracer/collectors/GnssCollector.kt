@@ -57,6 +57,7 @@ class GnssCollector @Inject constructor(
         val settings = ctx.settings.effective()
         val worker = Worker(id)
         var lastStatusMs = 0L
+        var noSky = false
         var lastRawMs = 0L
 
         val statusCallback = object : GnssStatus.Callback() {
@@ -64,6 +65,16 @@ class GnssCollector @Inject constructor(
                 val nowMs = SystemClock.elapsedRealtime()
                 if (nowMs - lastStatusMs < 1_000L) return
                 lastStatusMs = nowMs
+                // Engine running but no satellites (deep indoors): emits no rows, so say so explicitly —
+                // otherwise "engine off" and "no sky" are indistinguishable in the export.
+                val visibleNow = status.satelliteCount
+                if (visibleNow == 0 && !noSky) {
+                    noSky = true
+                    ctx.status.degraded(id, "GNSS engine running but no satellites visible (indoors / no sky view).")
+                } else if (visibleNow > 0 && noSky) {
+                    noSky = false
+                    ctx.status.ok(id)
+                }
                 val stamp = ctx.clock.now()
                 for (i in 0 until status.satelliteCount) {
                     val sample = GnssSatelliteSample(

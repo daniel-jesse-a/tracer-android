@@ -323,8 +323,13 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     private fun startDrop(out: MutableList<EventSample>, stamp: Stamp, path: String, reason: String, before: JsonObject?, after: JsonObject?) {
         val ps = ctx.pathState(path)
         ps.dropped = true; ps.dropStartMs = ctx.nowMs; ps.dropReason = reason
-        emit(out, stamp, EventType.DROP, Severity.CRITICAL, before,
-            JsonObject((after ?: JsonObject(emptyMap())) + mapOf("trigger" to JsonPrimitive(reason), "path" to JsonPrimitive(path))),
+        // If another transport is carrying the default network, the user stayed online: that is a
+        // path outage with failover (warning), not a connectivity drop (critical).
+        val failover = ctx.defaultPath().takeIf { it != path && ctx.path?.status == "satisfied" }
+        val extraFields = mutableMapOf<String, JsonElement>("trigger" to JsonPrimitive(reason), "path" to JsonPrimitive(path))
+        failover?.let { extraFields["failover"] = JsonPrimitive(it) }
+        emit(out, stamp, EventType.DROP, if (failover != null) Severity.WARNING else Severity.CRITICAL, before,
+            JsonObject((after ?: JsonObject(emptyMap())) + extraFields),
             extra = pathExtra(path))
     }
 
@@ -358,8 +363,9 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
             "public_ip" -> if (p.success && p.publicIp != null) {
                 val prev = ctx.lastPublicIp
                 ctx.lastPublicIp = p
-                if (prev?.publicIp != null && prev.isCellular == p.isCellular && (prev.publicIp != p.publicIp || prev.asn != p.asn)) {
-                    val asnChanged = prev.asn != p.asn
+                if (prev?.publicIp != null && prev.isCellular == p.isCellular &&
+                    (prev.publicIp != p.publicIp || (prev.asn != null && p.asn != null && prev.asn != p.asn))) {
+                    val asnChanged = prev.asn != null && p.asn != null && prev.asn != p.asn
                     emit(out, p.stamp, EventType.IP_ASN_CHANGE, if (asnChanged) Severity.WARNING else Severity.INFO,
                         buildJsonObject { put("public_ip", prev.publicIp); put("asn", prev.asn); put("asn_org", prev.asnOrg) },
                         buildJsonObject { put("public_ip", p.publicIp); put("asn", p.asn); put("asn_org", p.asnOrg) },

@@ -58,14 +58,23 @@ class PublicIpProbeCollector @Inject constructor(
         }
         val client = networks.client(baseClient, bound.network, 10_000L).newBuilder()
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build() // not a latency KPI: allow slow first connects
-        val r = HttpProbe.execute(client, request, BodyMode.Text())
-        val info = if (r.success) r.body?.let(::parseIpInfo) else null
+        var r = HttpProbe.execute(client, request, BodyMode.Text())
+        var info = if (r.success) r.body?.let(::parseIpInfo) else null
+        var endpoint = url
+        if (info?.ip == null) {
+            // Enterprise networks often block IP-lookup services (ipinfo.io timed out 3/3 on ER-Mobile);
+            // Cloudflare's trace endpoint still yields the public IP (ASN unknown).
+            val fb = Request.Builder().url(FALLBACK_URL).get().build()
+            val r2 = HttpProbe.execute(client, fb, BodyMode.Text())
+            val info2 = if (r2.success) r2.body?.let(::parseCloudflareTrace) else null
+            if (info2 != null) { r = r2; info = info2; endpoint = FALLBACK_URL }
+        }
         val ok = r.success && info?.ip != null
         return ProbeSample(
             runId = ctx.runId,
             stamp = stamp,
             probeType = "public_ip",
-            endpoint = url,
+            endpoint = endpoint,
             success = ok,
             error = r.error ?: if (!ok) "io" else null,
             dnsMs = r.phases.dnsMs,
@@ -83,5 +92,6 @@ class PublicIpProbeCollector @Inject constructor(
 
     private companion object {
         const val SETTLE_MS = 2_000L
+        const val FALLBACK_URL = "https://www.cloudflare.com/cdn-cgi/trace"
     }
 }

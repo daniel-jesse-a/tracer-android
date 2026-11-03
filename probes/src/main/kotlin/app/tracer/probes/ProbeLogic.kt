@@ -90,6 +90,12 @@ fun parseIpInfo(body: String): IpInfo? {
     return IpInfo(ip, asn, org)
 }
 
+/** Cloudflare `/cdn-cgi/trace` text (`key=value` lines) → IP only (no ASN). Fallback when ipinfo is blocked. */
+fun parseCloudflareTrace(body: String): IpInfo? {
+    val ip = body.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("ip=") }?.substringAfter("ip=")?.takeIf { it.isNotBlank() }
+    return ip?.let { IpInfo(it, null, null) }
+}
+
 /** Builds the throughput URL, substituting `{bytes}`. */
 fun throughputUrl(template: String, bytes: Long): String = template.replace("{bytes}", bytes.toString())
 

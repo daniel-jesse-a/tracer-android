@@ -66,4 +66,12 @@ class ProbeLogicTest {
         assertNull(mbps(0, 1))
         assertNull(mbps(10, 0))
     }
+
+    @Test fun cloudflareTraceFallback() {
+        val body = "fl=29f1\nh=www.cloudflare.com\nip=176.204.88.144\nts=1793716298.1\nloc=AE\n"
+        val info = parseCloudflareTrace(body)!!
+        org.junit.Assert.assertEquals("176.204.88.144", info.ip)
+        org.junit.Assert.assertNull(info.asn)
+        org.junit.Assert.assertNull(parseCloudflareTrace("<html>blocked</html>"))
+    }
 }
