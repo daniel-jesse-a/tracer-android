@@ -145,7 +145,8 @@ class CauseEngine {
                 c += Candidate(Cause.WIFI_WEAK, 0.6, buildJsonObject { put("min_rssi", minRssi) })
             }
             if (cur?.ssid != null && cur.rssiDbm != null && hist.any { (it.rssiDbm ?: 0) < th.wifiWeakRssi }) {
-                val connRssi = hist.filter { it.bssid == hist.firstOrNull()?.bssid }.mapNotNull { it.rssiDbm }.minOrNull() ?: cur.rssiDbm
+                val curRssi: Int = cur.rssiDbm ?: th.wifiWeakRssi
+                val connRssi: Int = hist.filter { it.bssid == hist.firstOrNull()?.bssid }.mapNotNull { it.rssiDbm }.minOrNull() ?: curRssi
                 val better = ctx.lastScan.filter { it.ssid == cur.ssid && it.bssid != (hist.firstOrNull()?.bssid ?: cur.bssid) }.maxByOrNull { it.rssiDbm }
                 if (better != null && better.rssiDbm - connRssi >= th.stickyDeltaDb) {
                     c += Candidate(Cause.STICKY_CLIENT, 0.8, buildJsonObject {
@@ -179,7 +180,9 @@ class CauseEngine {
             val recent = ctx.latencyProbes.since(ctx.nowMs, lb)
             val dnsErrors = recent.count { it.error == "dns" }
             val last = recent.lastOrNull()
-            val dnsShare = if (last?.dnsMs != null && last.totalMs != null && last.totalMs > 0) last.dnsMs / last.totalMs else 0.0
+            val lastDns = last?.dnsMs
+            val lastTotal = last?.totalMs
+            val dnsShare = if (lastDns != null && lastTotal != null && lastTotal > 0) lastDns / lastTotal else 0.0
             if (eventType == EventType.DNS_SPIKE || dnsShare > 0.5 || dnsErrors >= 2) {
                 c += Candidate(Cause.DNS, if (eventType == EventType.DNS_SPIKE || dnsShare > 0.5) 0.8 else 0.65, buildJsonObject {
                     put("dns_share_of_total", r2(dnsShare)); put("dns_errors", dnsErrors); put("dns_ms", last?.dnsMs)

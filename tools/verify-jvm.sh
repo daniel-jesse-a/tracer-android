@@ -12,8 +12,12 @@ STD="$(jar 'kotlin-stdlib-[0-9]*.jar')"
 CP_RT="$STD:$(jar 'kotlinx-coroutines-core-jvm-*.jar'):$(jar 'kotlinx-serialization-core-jvm-*.jar'):$(jar 'kotlinx-serialization-json-jvm-*.jar')"
 CP_C="$(ls "$L"/*.jar | tr '\n' ':')"
 kc() { java -Xmx2g -cp "$CP_C" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -jvm-target 17 "$@"; }
-echo "== compiling :core + :events"
-kc -cp "$CP_RT" -d "$OUT/main" $(find "$ROOT/core/src/main" "$ROOT/events/src/main" -name '*.kt')
+echo "== compiling :core"
+kc -module-name core -cp "$CP_RT" -d "$OUT/main" $(find "$ROOT/core/src/main" -name '*.kt')
+echo "== compiling :events (separate module, as Gradle does — catches cross-module smart-cast errors)"
+mkdir -p "$OUT/events"
+kc -module-name events -cp "$CP_RT:$OUT/main" -d "$OUT/events" $(find "$ROOT/events/src/main" -name '*.kt')
+cp -r "$OUT/events"/. "$OUT/main"/
 # Android-free logic from the Android modules (pure mapping/format/decimation helpers)
 EXTRA_MAIN=(
   collectors/src/main/kotlin/app/tracer/collectors/Mappings.kt
@@ -37,7 +41,7 @@ EXTRA_TEST=(
 )
 echo "== compiling Android-free helpers from Android modules"
 mkdir -p "$OUT/extra"
-kc -cp "$CP_RT:$OUT/main" -d "$OUT/extra" "${EXTRA_MAIN[@]/#/$ROOT/}"
+kc -module-name extra -cp "$CP_RT:$OUT/main" -d "$OUT/extra" "${EXTRA_MAIN[@]/#/$ROOT/}"
 echo "== compiling tests"
 kc -Xfriend-paths="$OUT/main,$OUT/extra" -cp "$CP_RT:$OUT/main:$OUT/extra:$(jar 'junit-4*.jar')" -d "$OUT/test" $(find "$ROOT/core/src/test" "$ROOT/events/src/test" -name '*.kt' 2>/dev/null) "${EXTRA_TEST[@]/#/$ROOT/}"
 for r in "$ROOT/core/src/test/resources" "$ROOT/events/src/test/resources" "$ROOT/core/src/main/resources"; do [ -d "$r" ] && cp -r "$r"/. "$OUT/test"/; done

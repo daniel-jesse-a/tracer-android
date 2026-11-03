@@ -22,7 +22,7 @@ internal fun CellInfo.toRawCell(): RawCell? = when (this) {
         RawCell(
             type = "LTE",
             registered = isRegistered,
-            timestampNanos = timestampNanos,
+            timestampNanos = timestampMillis * 1_000_000L, // CellInfo.getTimestampMillis (API 30), elapsedRealtime base
             mcc = id.mccString,
             mnc = id.mncString,
             tac = id.tac,
@@ -45,7 +45,7 @@ internal fun CellInfo.toRawCell(): RawCell? = when (this) {
         RawCell(
             type = "NR",
             registered = isRegistered,
-            timestampNanos = timestampNanos,
+            timestampNanos = timestampMillis * 1_000_000L, // CellInfo.getTimestampMillis (API 30), elapsedRealtime base
             mcc = id?.mccString,
             mnc = id?.mncString,
             tac = id?.tac,
@@ -68,7 +68,7 @@ internal fun CellInfo.toRawCell(): RawCell? = when (this) {
         RawCell(
             type = "WCDMA",
             registered = isRegistered,
-            timestampNanos = timestampNanos,
+            timestampNanos = timestampMillis * 1_000_000L, // CellInfo.getTimestampMillis (API 30), elapsedRealtime base
             mcc = id.mccString,
             mnc = id.mncString,
             tac = id.lac,
@@ -85,7 +85,7 @@ internal fun CellInfo.toRawCell(): RawCell? = when (this) {
         RawCell(
             type = "GSM",
             registered = isRegistered,
-            timestampNanos = timestampNanos,
+            timestampNanos = timestampMillis * 1_000_000L, // CellInfo.getTimestampMillis (API 30), elapsedRealtime base
             mcc = id.mccString,
             mnc = id.mncString,
             tac = id.lac,
@@ -102,7 +102,7 @@ internal fun CellInfo.toRawCell(): RawCell? = when (this) {
         RawCell(
             type = "TDSCDMA",
             registered = isRegistered,
-            timestampNanos = timestampNanos,
+            timestampNanos = timestampMillis * 1_000_000L, // CellInfo.getTimestampMillis (API 30), elapsedRealtime base
             mcc = id.mccString,
             mnc = id.mncString,
             tac = id.lac,

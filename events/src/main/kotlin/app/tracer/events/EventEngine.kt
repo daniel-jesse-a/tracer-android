@@ -190,7 +190,8 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
         val maxRecent = hist.since(ctx.nowMs, windowMs).mapNotNull { it.rsrp }.maxOrNull()
         ctx.serving[key] = c
         hist.add(ctx.nowMs, c)
-        if (c.rsrp != null && maxRecent != null && maxRecent - c.rsrp > th.signalDropDb) {
+        val rsrpNow = c.rsrp
+        if (rsrpNow != null && maxRecent != null && maxRecent - rsrpNow > th.signalDropDb) {
             emit(out, c.stamp, EventType.SIGNAL_DROP, Severity.WARNING,
                 buildJsonObject { put("rsrp", maxRecent) }, cellJson(c), spacingKey = "${EventType.SIGNAL_DROP}:$key")
         }
@@ -287,14 +288,17 @@ class EventEngine(private val runId: String, thresholds: Thresholds = Thresholds
     private fun onProbe(p: ProbeSample, out: MutableList<EventSample>) {
         when (p.probeType) {
             "latency" -> onLatency(p, out)
-            "throughput" -> if (p.success && p.mbps != null) {
-                val median = ctx.throughputMedian()
-                if (median != null && ctx.throughput.size >= th.throughputMinSamples && p.mbps < median * (1 - th.throughputDropFraction)) {
-                    emit(out, p.stamp, EventType.THROUGHPUT_DROP, Severity.WARNING,
-                        buildJsonObject { put("median_mbps", median) }, buildJsonObject { put("mbps", p.mbps); put("interface", p.iface) },
-                        spacingKey = EventType.THROUGHPUT_DROP)
+            "throughput" -> {
+                val mbps = p.mbps
+                if (p.success && mbps != null) {
+                    val median = ctx.throughputMedian()
+                    if (median != null && ctx.throughput.size >= th.throughputMinSamples && mbps < median * (1 - th.throughputDropFraction)) {
+                        emit(out, p.stamp, EventType.THROUGHPUT_DROP, Severity.WARNING,
+                            buildJsonObject { put("median_mbps", median) }, buildJsonObject { put("mbps", mbps); put("interface", p.iface) },
+                            spacingKey = EventType.THROUGHPUT_DROP)
+                    }
+                    ctx.throughput.add(mbps)
                 }
-                ctx.throughput += p.mbps
             }
             "public_ip" -> if (p.success && p.publicIp != null) {
                 val prev = ctx.lastPublicIp
