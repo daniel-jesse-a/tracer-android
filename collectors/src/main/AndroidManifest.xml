@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- location / gnss / cellular / wifi_scan / wifi_rtt -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- cellular (subscriptions, display info, service state); DeviceInfoProvider.activeSims -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- wifi / wifi_scan / wifi_rtt. Scan results are used for location, so no neverForLocation flag. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <!-- wifi / network_path -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- motion (activity transitions only; sensors need no permission) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.rtt" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.barometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+</manifest>
