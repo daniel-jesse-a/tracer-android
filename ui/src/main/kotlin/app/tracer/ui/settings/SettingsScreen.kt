@@ -120,7 +120,7 @@ fun SettingsScreen(
             Caption("Phone")
             Group {
                 ListRow("Phone setup", if (limits.isEmpty()) "All set" else "${limits.size} to fix", onClick = onOpenPhoneSetup,
-                    leading = { Dot(if (limits.isEmpty()) tc.veryGood else tc.belowAvg, 10.dp) })
+                    leading = { app.tracer.ui.kit.Dot(if (limits.isEmpty()) tc.veryGood else tc.belowAvg, 10.dp) })
             }
 
             Caption("Test defaults")

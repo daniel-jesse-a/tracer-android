@@ -141,7 +141,7 @@ fun NewTestScreen(
             if (extra.isNotEmpty()) {
                 Spacer(Modifier.height(K.gap))
                 GroupCard(rows = extra.map<app.tracer.ui.fix.Limit, @Composable () -> Unit> { l ->
-                    { ListRow(l.title, sub = l.short, value = "Fix", onClick = { guides.open(l) }, leading = { Dot(tc.belowAvg, 10.dp) }) }
+                    { app.tracer.ui.kit.ListRow(l.title, sub = l.short, value = "Fix", onClick = { guides.open(l) }, leading = { app.tracer.ui.kit.Dot(tc.belowAvg, 10.dp) }) }
                 }, inset = 42.dp)
             }
 
