@@ -110,7 +110,11 @@ class PairingServiceTest {
             val before = SampleCodec.encode(s)
             val after = SampleCodec.encode(moved)
             assertEquals(listOf<Any?>("r1", 9_999L, 8_888L), after.take(3))
-            if (s is LocationSample) {
+            if (s is app.tracer.core.model.IntegritySample) {
+                // integrity.gps_time_ms is taken from the stamp, so it follows the new stamp
+                assertEquals(7_777L, after[3])
+                assertEquals(before.drop(4), after.drop(4))
+            } else if (s is LocationSample) {
                 // gps_time_ms comes from the sample's own field, which withStamp must not touch
                 assertEquals(before.drop(3), after.drop(3))
             } else {
