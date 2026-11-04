@@ -39,6 +39,12 @@ class NumericSeries(
     /** Samples that failed (e.g. probe timeout) → hatched band. Same size as [xs] or null. */
     val failed: BooleanArray? = null,
     override val noDataText: String? = null,
+    /**
+     * Direction of "good" (see core/report/Direction.kt). With a [threshold], the bad side of it is
+     * tinted: below for higher-is-better lanes (RSRP, SINR, Wi-Fi), above for lower-is-better lanes
+     * (latency, loss), so a rising latency line reads as worse at a glance.
+     */
+    val higherIsBetter: Boolean = true,
 ) : ChartSeries() {
     override val hasData: Boolean = ys.any { !it.isNaN() } || (failed?.any { it } ?: false)
 

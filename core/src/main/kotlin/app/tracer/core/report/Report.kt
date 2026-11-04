@@ -625,15 +625,26 @@ data class Comparison(
 ) {
     val checksBefore get() = older.checksPassedPct
     val checksAfter get() = newer.checksPassedPct
-    val improved: Boolean get() = (checksAfter ?: 0.0) >= (checksBefore ?: 0.0)
-    /** Lines "False drops 4 → 0", "GPS fixes 0 → 88", plus any other metric that moved a verdict step. */
-    val deltas: List<String> get() = buildList {
-        if (older.falseDrops != newer.falseDrops || older.falseDrops > 0) add("False drops ${older.falseDrops} → ${newer.falseDrops}")
-        if (older.gpsFixes != newer.gpsFixes) add("GPS fixes ${older.gpsFixes} → ${newer.gpsFixes}")
-        if (older.onlineVerdict != newer.onlineVerdict && older.onlinePct != null && newer.onlinePct != null)
-            add("Online ${older.onlinePct.roundToInt()}% → ${newer.onlinePct.roundToInt()}%")
-        if (older.switches != newer.switches) add("Switches ${older.switches} → ${newer.switches}")
+    /** Checks passed did not go down (checks % is higher-is-better). */
+    val improved: Boolean get() = Direction.better(Metric.CHECKS, checksBefore ?: 0.0, checksAfter ?: 0.0) != false
+    /**
+     * "False drops 4 → 0", "GPS fixes 0 → 88", "Response 268 → 180 ms", "Switches 1 → 4", plus online
+     * when it moved a verdict step. Each carries its direction ([Delta.better]) so the UI can colour
+     * an improvement green whichever way the number moved.
+     */
+    val changes: List<Delta> get() = buildList {
+        if (older.falseDrops != newer.falseDrops || older.falseDrops > 0)
+            add(Delta.of(Metric.FALSE_DROPS, older.falseDrops.toDouble(), newer.falseDrops.toDouble()))
+        if (older.gpsFixes != newer.gpsFixes) add(Delta.of(Metric.GPS_FIXES, older.gpsFixes.toDouble(), newer.gpsFixes.toDouble()))
+        val ob = older.onlinePct; val na = newer.onlinePct
+        if (older.onlineVerdict != newer.onlineVerdict && ob != null && na != null) add(Delta.of(Metric.ONLINE, ob, na))
+        val rb = older.responseMs; val ra = newer.responseMs
+        if (rb != null && ra != null && (older.responseVerdict != newer.responseVerdict || kotlin.math.abs(ra - rb) >= 25.0))
+            add(Delta.of(Metric.RESPONSE, rb, ra))
+        if (older.switches != newer.switches) add(Delta.of(Metric.SWITCHES, older.switches.toDouble(), newer.switches.toDouble()))
     }
+    /** Plain lines of [changes]. */
+    val deltas: List<String> get() = changes.map { it.text }
 
     companion object {
         /** Newest test vs the oldest earlier test at the same site, if any. */

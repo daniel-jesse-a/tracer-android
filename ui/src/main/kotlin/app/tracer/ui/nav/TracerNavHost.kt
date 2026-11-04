@@ -46,7 +46,11 @@ import app.tracer.ui.replay.ReplayRoute
 import app.tracer.ui.settings.SettingsRepository
 import app.tracer.ui.settings.SettingsScreen
 import app.tracer.ui.share.ShareScreen
+import app.tracer.ui.signals.LocationDetailScreen
+import app.tracer.ui.signals.MobileDetailScreen
+import app.tracer.ui.signals.ResponseDetailScreen
 import app.tracer.ui.signals.SignalsScreen
+import app.tracer.ui.signals.WifiDetailScreen
 import app.tracer.ui.summary.TestSummaryScreen
 import app.tracer.ui.tests.TestsScreen
 import app.tracer.ui.theme.TType
@@ -61,7 +65,7 @@ import javax.inject.Inject
 /**
  * Design v2 navigation.
  *
- *  Welcome → Tests (tab) ─┬─ New test (tab, full screen) → Live → Signals
+ *  Welcome → Tests (tab) ─┬─ New test (tab, full screen) → Live → Signals → Wi-Fi / Mobile data / Response / Location
  *                         │                                 └→ Test summary
  *                         └─ Test summary → Diagnostics (Simple | Detailed) → Moment detail
  *                                        └→ Share
@@ -74,6 +78,10 @@ object Routes {
     const val SETTINGS = "settings"
     const val LIVE = "live"
     const val SIGNALS = "signals"
+    const val SIGNALS_WIFI = "signals/wifi"
+    const val SIGNALS_MOBILE = "signals/mobile"
+    const val SIGNALS_RESPONSE = "signals/response"
+    const val SIGNALS_LOCATION = "signals/location"
     const val SUMMARY = "summary/{runId}"
     const val DIAGNOSTICS = "diagnostics/{runId}"
     const val MOMENT = "moment/{runId}/{index}"
@@ -184,7 +192,19 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
                     onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 )
             }
-            composable(Routes.SIGNALS) { SignalsScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.SIGNALS) {
+                SignalsScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenWifi = { nav.navigate(Routes.SIGNALS_WIFI) { launchSingleTop = true } },
+                    onOpenMobile = { nav.navigate(Routes.SIGNALS_MOBILE) { launchSingleTop = true } },
+                    onOpenResponse = { nav.navigate(Routes.SIGNALS_RESPONSE) { launchSingleTop = true } },
+                    onOpenLocation = { nav.navigate(Routes.SIGNALS_LOCATION) { launchSingleTop = true } },
+                )
+            }
+            composable(Routes.SIGNALS_WIFI) { WifiDetailScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.SIGNALS_MOBILE) { MobileDetailScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.SIGNALS_RESPONSE) { ResponseDetailScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.SIGNALS_LOCATION) { LocationDetailScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.SUMMARY, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
                 val id = e.arguments?.getString("runId").orEmpty()
                 TestSummaryScreen(

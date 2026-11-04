@@ -345,6 +345,9 @@ private fun NumericPlot(s: NumericSeries, v: View, cursor: State<Long?>) {
         s.threshold?.let { th ->
             val range = (s.yMax - s.yMin).takeIf { it > 0f } ?: 1f
             val y = pad + (size.height - 2 * pad) * (1f - ((th - s.yMin) / range).coerceIn(0f, 1f))
+            // tint the bad side of the threshold: above it when lower is better, below it otherwise
+            if (s.higherIsBetter) drawRect(colors.bad.copy(alpha = 0.08f), Offset(0f, y), Size(size.width, size.height - y))
+            else drawRect(colors.bad.copy(alpha = 0.08f), Offset(0f, 0f), Size(size.width, y))
             drawLine(thresholdColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = dotted)
         }
         path?.let { drawPath(it, s.color, style = stroke) }

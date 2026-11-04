@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import app.tracer.core.model.RunRecord
 import app.tracer.core.report.Comparison
+import app.tracer.core.report.Metric
 import app.tracer.core.report.ReportJson
 import app.tracer.core.report.TestReport
 import app.tracer.core.report.fmtClock
@@ -138,12 +139,12 @@ class ShareFiles @Inject constructor(
         appendLine()
         appendLine("Length ${fmtClock(r.durationS)} · ${run.deviceModel} · Tracer ${run.appVersion}")
         r.onlinePct?.let { appendLine("Online ${it.roundToInt()}% (${r.onlineVerdict.label})") }
-        line("Wi-Fi speed", r.wifiSpeedMedian ?: r.wifiSpeedMax, "Mbps", r.wifiSpeedVerdict.label)
-        line("Mobile speed", r.mobileSpeedMedian ?: r.mobileSpeedMax, "Mbps", r.mobileSpeedVerdict.label)
-        line("Response", r.responseMs, "ms", r.responseVerdict.label)
+        if (r.wifiTested) line("Wi-Fi speed", r.wifiSpeedMedian ?: r.wifiSpeedMax, "Mbps", r.wifiSpeedVerdict.label)
+        if (r.mobileTested) line("Mobile speed", r.mobileSpeedMedian ?: r.mobileSpeedMax, "Mbps", r.mobileSpeedVerdict.label)
+        line("Response", r.responseMs, "ms", "${r.responseVerdict.label}, ${Metric.RESPONSE.hint}")
         line("Wi-Fi signal (median)", r.wifiRssiMedian, "dBm", r.wifiVerdict.label)
         line("Mobile signal (median RSRP)", r.rsrpMedian, "dBm", r.mobileVerdict.label)
-        appendLine("Switches ${r.switches} (${r.stabilityVerdict.label})")
+        appendLine("Switches ${r.switches} (${r.stabilityVerdict.label}, ${Metric.SWITCHES.hint})")
         r.checksPassedPct?.let { appendLine("Checks passed ${it.roundToInt()}% · test quality ${r.qualityVerdict.label}") }
         if (r.moments.isNotEmpty()) {
             appendLine()
@@ -181,6 +182,18 @@ class ShareFiles @Inject constructor(
             put("checks_passed_after", c.checksAfter)
             put("improved", c.improved)
             put("deltas", buildJsonArray { c.deltas.forEach { add(it) } })
+            put("changes", buildJsonArray {
+                c.changes.forEach { d ->
+                    add(buildJsonObject {
+                        put("metric", d.metric.name.lowercase())
+                        put("before", d.before)
+                        put("after", d.after)
+                        put("higher_is_better", d.metric.higherIsBetter)
+                        put("better", d.better)
+                        put("text", d.text)
+                    })
+                }
+            })
         }
     }
 

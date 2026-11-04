@@ -156,11 +156,19 @@ private fun ComparisonCard(c: Comparison) {
             Spacer(Modifier.width(12.dp))
             Text("checks passed", style = TType.bodyRegular, color = tc.text2, modifier = Modifier.padding(bottom = 5.dp))
         }
-        val deltas = c.deltas.take(2)
+        // each line coloured by its own direction: fewer drops / faster response = green, more switches = orange
+        val deltas = c.changes.take(4)
         if (deltas.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                deltas.forEach { d -> Text(d, style = TType.sub.copy(fontSize = 16.sp).merge(TType.num), color = tc.text2, maxLines = 1) }
+            deltas.forEach { d ->
+                val color = when (d.better) { true -> tc.veryGood; false -> tc.belowAvg; null -> tc.text2 }
+                Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Dot(color, 7.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(d.text, style = TType.sub.copy(fontSize = 16.sp).merge(TType.num), color = color, maxLines = 1)
+                    val word = when (d.better) { true -> "better"; false -> "worse"; null -> null }
+                    if (word != null) Text("  $word", style = TType.footnote.copy(fontSize = 13.sp), color = tc.text3, maxLines = 1)
+                }
             }
         }
     }

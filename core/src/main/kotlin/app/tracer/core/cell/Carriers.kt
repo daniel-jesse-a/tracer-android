@@ -97,3 +97,34 @@ object Carriers {
         return RadioDerivation(rat, nrState, carriers, ca)
     }
 }
+
+/** Parsed radio.carrier_aggregation JSON for display (Mobile detail › Carriers). */
+data class CarrierSet(val carriers: List<CarrierSpec>, val aggregateMhz: Double?, val active: Boolean) {
+    companion object {
+        val EMPTY = CarrierSet(emptyList(), null, false)
+
+        /** Tolerant: missing fields → null; invalid JSON → [EMPTY]. Older rows without "carriers" give bandwidths only. */
+        fun parse(json: String?): CarrierSet {
+            if (json.isNullOrBlank()) return EMPTY
+            val o = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull() ?: return EMPTY
+            fun JsonObject.p(k: String) = this[k] as? JsonPrimitive
+            val list = (o["carriers"] as? JsonArray)?.mapIndexedNotNull { i, e ->
+                val c = e as? JsonObject ?: return@mapIndexedNotNull null
+                CarrierSpec(
+                    index = i,
+                    rat = c.p("rat")?.contentOrNull ?: "?",
+                    band = c.p("band")?.contentOrNull,
+                    arfcn = c.p("arfcn")?.intOrNull,
+                    pci = c.p("pci")?.intOrNull,
+                    bandwidthMhz = c.p("bandwidth_mhz")?.doubleOrNull,
+                    primary = c.p("primary")?.booleanOrNull ?: (i == 0),
+                    source = "json",
+                )
+            } ?: (o["bandwidths_khz"] as? JsonArray)?.mapIndexedNotNull { i, e ->
+                val khz = (e as? JsonPrimitive)?.intOrNull ?: return@mapIndexedNotNull null
+                CarrierSpec(i, if (khz > 20_000) "NR" else "?", null, null, null, khz / 1000.0, i == 0, "bandwidth")
+            }.orEmpty()
+            return CarrierSet(list, o.p("aggregate_mhz")?.doubleOrNull, o.p("active")?.booleanOrNull ?: (list.size > 1))
+        }
+    }
+}

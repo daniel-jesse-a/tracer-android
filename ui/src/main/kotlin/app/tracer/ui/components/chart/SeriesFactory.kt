@@ -25,12 +25,12 @@ object SeriesFactory {
     fun sinr(label: String, xs: LongArray, ys: FloatArray, colors: TracerExtraColors, noDataText: String? = null) =
         NumericSeries(label, "dB", xs, ys, -10f, 30f, colors.excellent, decimals = 0, threshold = 0f, noDataText = noDataText)
 
-    /** Latency 0…400 ms; failed probes (timeouts) are hatched. */
+    /** Latency 0…400 ms (lower is better: the region above 250 ms is tinted); failed probes (timeouts) are hatched. */
     fun latency(label: String, xs: LongArray, ys: FloatArray, failed: BooleanArray?, colors: TracerExtraColors, noDataText: String? = null) =
-        NumericSeries(label, "ms", xs, ys, 0f, 400f, colors.fair, threshold = 250f, failed = failed, noDataText = noDataText)
+        NumericSeries(label, "ms", xs, ys, 0f, 400f, colors.fair, threshold = 250f, failed = failed, noDataText = noDataText, higherIsBetter = false)
 
     fun loss(label: String, xs: LongArray, ys: FloatArray, colors: TracerExtraColors, noDataText: String? = null) =
-        NumericSeries(label, "%", xs, ys, 0f, 100f, colors.bad, noDataText = noDataText)
+        NumericSeries(label, "%", xs, ys, 0f, 100f, colors.bad, threshold = 5f, noDataText = noDataText, higherIsBetter = false)
 
     fun throughput(label: String, xs: LongArray, ys: FloatArray, colors: TracerExtraColors, noDataText: String? = null) =
         NumericSeries(label, "Mb/s", xs, ys, 0f, 200f, colors.nrSa, decimals = 1, maxGapNs = 180_000_000_000L, noDataText = noDataText)

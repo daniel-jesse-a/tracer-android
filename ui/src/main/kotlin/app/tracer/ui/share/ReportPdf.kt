@@ -134,6 +134,8 @@ object ReportPdf {
             tiles()
             timeline()
             wifiChart()
+            mobileChart()
+            responseChart()
             moments()
             quality()
             details()
@@ -163,13 +165,15 @@ object ReportPdf {
         }
 
         private fun tiles() {
-            data class T(val label: String, val value: String, val unit: String?, val v: Verdict)
+            data class T(val label: String, val value: String, val unit: String?, val v: Verdict, val word: String? = null)
             val ws = r.wifiSpeedMedian ?: r.wifiSpeedMax
             val ms = r.mobileSpeedMedian ?: r.mobileSpeedMax
             val rt = r.responseMs
             val list = listOf(
-                T("Wi-Fi speed", ws?.let { "${it.roundToInt()}" } ?: "–", ws?.let { "Mbps" }, r.wifiSpeedVerdict),
-                T("Mobile speed", ms?.let { "${it.roundToInt()}" } ?: "–", ms?.let { "Mbps" }, r.mobileSpeedVerdict),
+                T("Wi-Fi speed", ws?.takeIf { r.wifiTested }?.let { "${it.roundToInt()}" } ?: "–", ws?.takeIf { r.wifiTested }?.let { "Mbps" },
+                    if (r.wifiTested) r.wifiSpeedVerdict else Verdict.NONE, if (r.wifiTested) null else "Not tested"),
+                T("Mobile speed", ms?.takeIf { r.mobileTested }?.let { "${it.roundToInt()}" } ?: "–", ms?.takeIf { r.mobileTested }?.let { "Mbps" },
+                    if (r.mobileTested) r.mobileSpeedVerdict else Verdict.NONE, if (r.mobileTested) null else "Not tested"),
                 T("Response", rt?.let { "≤${it.roundToInt()}" } ?: "–", rt?.let { "ms" }, r.responseVerdict),
                 T("Stability", "${r.switches}", if (r.switches == 1) "switch" else "switches", r.stabilityVerdict),
             )
@@ -190,7 +194,7 @@ object ReportPdf {
                     val sx = x + 10 + s * (segW + 3)
                     cv.drawRoundRect(RectF(sx, y + 50, sx + segW, y + 54), 2f, 2f, fill(if (s < t.v.segments) fg(t.v) else 0x1F000000))
                 }
-                cv.drawText(t.v.label, x + 10, y + 69, text(10f, fg(t.v), true))
+                cv.drawText(t.word ?: t.v.label, x + 10, y + 69, text(10f, fg(t.v), true))
             }
             y += h + 20
         }
@@ -230,41 +234,132 @@ object ReportPdf {
             y += 18
         }
 
-        private fun wifiChart() {
-            val pts = r.wifiRssi
-            if (pts.isEmpty() || r.durationS <= 0) return
-            val h = 96f
-            sectionTitle("Wi-Fi strength", h + 18)
-            val top = -45.0; val bottom = -90.0
-            val third = h / 3
-            cv.drawRect(M, y, M + CW, y + third, fill(C.veryGoodBg.toArgb()))
-            cv.drawRect(M, y + third, M + CW, y + 2 * third, fill(C.averageBg.toArgb()))
-            cv.drawRect(M, y + 2 * third, M + CW, y + h, fill(C.badBg.toArgb()))
-            cv.drawText("Strong", M + 5, y + 11, text(8f, C.veryGood.toArgb(), true))
-            cv.drawText("OK", M + 5, y + third + 11, text(8f, C.average.toArgb(), true))
-            cv.drawText("Weak", M + 5, y + 2 * third + 11, text(8f, C.bad.toArgb(), true))
+        private data class Band(val from: Double, val to: Double, val fill: Int, val label: String?, val labelColor: Int)
+        private data class Series(val pts: List<app.tracer.core.report.Pt>, val color: Int, val dashed: Boolean = false)
+
+        /**
+         * One chart frame across the page: bands, optional dashed reference line, series, switch markers.
+         * An empty frame carries [emptyReason] so a missing graph always says why.
+         */
+        private fun chart(
+            title: String, series: List<Series>, top: Double, bottom: Double, bands: List<Band>,
+            ref: Pair<Double, String>? = null, emptyReason: String?, caption: String?, note: String? = null,
+            rings: List<Pair<Double, Double>> = emptyList(), legend: List<Triple<String, Int, Boolean>> = emptyList(),
+        ) {
+            if (r.durationS <= 0) return
+            val h = 92f
+            sectionTitle(title, h + 30)
             val x = { t: Double -> M + (t / r.durationS * CW).toFloat() }
             val yy = { v: Double -> y + ((top - v.coerceIn(bottom, top)) / (top - bottom) * h).toFloat() }
-            val path = Path()
-            val maxGap = maxOf(15.0, r.durationS / 30)
-            pts.forEachIndexed { i, p ->
-                if (i == 0 || p.tS - pts[i - 1].tS > maxGap) path.moveTo(x(p.tS), yy(p.v)) else path.lineTo(x(p.tS), yy(p.v))
+            val empty = emptyReason != null
+            for (b in bands) {
+                val y0 = yy(maxOf(b.from, b.to)); val y1 = yy(minOf(b.from, b.to))
+                if (y1 - y0 < 1f) continue
+                cv.drawRect(M, y0, M + CW, y1, fill(b.fill).apply { if (empty) alpha = 110 })
+                if (!empty && b.label != null && y1 - y0 >= 11f) cv.drawText(b.label, M + 5, y0 + 10, text(8f, b.labelColor, true))
             }
-            cv.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = C.wifi.toArgb(); style = Paint.Style.STROKE; strokeWidth = 1.6f
-                strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
-            })
-            val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BLACK; style = Paint.Style.STROKE; strokeWidth = 1.2f }
-            for (t in r.newApAtS) {
-                val near = pts.minByOrNull { kotlin.math.abs(it.tS - t) } ?: continue
-                cv.drawCircle(x(t), yy(near.v), 3.5f, fill(android.graphics.Color.WHITE))
-                cv.drawCircle(x(t), yy(near.v), 3.5f, ring)
+            if (ref != null) {
+                val ry = yy(ref.first)
+                cv.drawLine(M, ry, M + CW, ry, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = C.veryGood.toArgb(); strokeWidth = 1f; pathEffect = android.graphics.DashPathEffect(floatArrayOf(4f, 3f), 0f)
+                })
+                if (!empty) cv.drawText(ref.second, M + 5, ry - 3, text(8f, C.veryGood.toArgb(), true))
+            }
+            if (empty) {
+                cv.drawText(emptyReason ?: "", M + CW / 2, y + h / 2 + 4, text(10f, TEXT3, align = Paint.Align.CENTER))
+            } else {
+                val dotted = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = TEXT3; strokeWidth = 0.8f; pathEffect = android.graphics.DashPathEffect(floatArrayOf(1.5f, 2f), 0f)
+                }
+                for (t in app.tracer.core.report.ChartText.switchTimes(r)) cv.drawLine(x(t), y, x(t), y + h, dotted)
+                val maxGap = maxOf(15.0, r.durationS / 30)
+                for (s in series) {
+                    if (s.pts.isEmpty()) continue
+                    val path = Path()
+                    s.pts.forEachIndexed { i, p ->
+                        if (i == 0 || p.tS - s.pts[i - 1].tS > maxGap) path.moveTo(x(p.tS), yy(p.v)) else path.lineTo(x(p.tS), yy(p.v))
+                    }
+                    cv.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = s.color; style = Paint.Style.STROKE; strokeWidth = 1.6f
+                        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+                        if (s.dashed) pathEffect = android.graphics.DashPathEffect(floatArrayOf(4f, 3f), 0f)
+                    })
+                }
+                val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BLACK; style = Paint.Style.STROKE; strokeWidth = 1.2f }
+                for ((t, v) in rings) {
+                    cv.drawCircle(x(t), yy(v), 3.5f, fill(android.graphics.Color.WHITE))
+                    cv.drawCircle(x(t), yy(v), 3.5f, ring)
+                }
             }
             y += h + 11
             cv.drawText("0:00", M, y, text(8.5f, TEXT3))
-            cv.drawText("○ = new access point", M + CW / 2, y, text(8.5f, TEXT3, align = Paint.Align.CENTER))
+            val mid = listOfNotNull(caption, note).joinToString(" · ")
+            if (mid.isNotEmpty()) cv.drawText(mid, M + CW / 2, y, text(8.5f, TEXT3, align = Paint.Align.CENTER))
             cv.drawText(fmtClock(r.durationS), M + CW, y, text(8.5f, TEXT3, align = Paint.Align.RIGHT))
+            if (legend.isNotEmpty() && !empty) {
+                y += 12
+                var lx = M
+                val lp = text(8.5f, TEXT3)
+                for ((label, color, dashed) in legend) {
+                    cv.drawLine(lx, y - 3, lx + 12, y - 3, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        this.color = color; strokeWidth = 1.6f
+                        if (dashed) pathEffect = android.graphics.DashPathEffect(floatArrayOf(3f, 2f), 0f)
+                    })
+                    cv.drawText(label, lx + 16, y, lp); lx += 16 + lp.measureText(label) + 14
+                }
+            }
             y += 18
+        }
+
+        private fun wifiChart() {
+            chart(
+                "Wi-Fi strength",
+                listOf(Series(r.wifiRssi, C.wifi.toArgb())), -40.0, -95.0,
+                listOf(
+                    Band(-65.0, -40.0, C.veryGoodBg.toArgb(), "Strong", C.veryGood.toArgb()),
+                    Band(-80.0, -65.0, C.averageBg.toArgb(), "OK", C.average.toArgb()),
+                    Band(-95.0, -80.0, C.badBg.toArgb(), "Weak", C.bad.toArgb()),
+                ),
+                emptyReason = app.tracer.core.report.ChartText.wifi(r),
+                caption = "○ = new access point · dotted = network switch",
+                rings = r.newApAtS.mapNotNull { t -> r.wifiRssi.minByOrNull { kotlin.math.abs(it.tS - t) }?.let { t to it.v } },
+            )
+        }
+
+        private fun mobileChart() {
+            val hasNr = r.nrRsrpSeries.isNotEmpty()
+            chart(
+                "Mobile signal" + (r.mobileTech?.let { " · $it" } ?: ""),
+                listOf(Series(r.rsrpSeries, C.mobile.toArgb()), Series(r.nrRsrpSeries, C.mobile.toArgb(), dashed = true)),
+                -70.0, -130.0,
+                listOf(
+                    Band(-90.0, -70.0, C.veryGoodBg.toArgb(), "Strong", C.veryGood.toArgb()),
+                    Band(-110.0, -90.0, C.averageBg.toArgb(), "OK", C.average.toArgb()),
+                    Band(-130.0, -110.0, C.badBg.toArgb(), "Weak", C.bad.toArgb()),
+                ),
+                emptyReason = app.tracer.core.report.ChartText.mobile(r),
+                caption = "RSRP dBm, higher is better",
+                note = app.tracer.core.report.ChartText.nr(r),
+                legend = if (hasNr || r.nrSeen) listOf(Triple("4G anchor", C.mobile.toArgb(), false), Triple("5G (NR leg)", C.mobile.toArgb(), true)) else emptyList(),
+            )
+        }
+
+        private fun responseChart() {
+            val all = r.responseWifi + r.responseMobile
+            val top = maxOf(400.0, (all.maxOfOrNull { it.v } ?: 0.0) * 1.15)
+            chart(
+                "Response time",
+                listOf(Series(r.responseWifi, C.wifi.toArgb()), Series(r.responseMobile, C.mobile.toArgb())),
+                top, 0.0,
+                listOf(
+                    Band(0.0, 150.0, C.veryGoodBg.toArgb(), null, 0),
+                    Band(300.0, top, C.badBg.toArgb(), "Slow", C.bad.toArgb()),
+                ),
+                ref = 150.0 to "Good below 150 ms",
+                emptyReason = app.tracer.core.report.ChartText.response(r),
+                caption = "ms, lower is better",
+                legend = listOf(Triple("Wi-Fi", C.wifi.toArgb(), false), Triple("Mobile", C.mobile.toArgb(), false)),
+            )
         }
 
         private fun moments() {

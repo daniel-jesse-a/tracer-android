@@ -45,6 +45,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.tracer.core.report.Carrier
+import app.tracer.core.report.ChartText
 import app.tracer.core.report.Moment
 import app.tracer.core.report.Pt
 import app.tracer.core.report.TestReport
@@ -108,6 +109,12 @@ fun DiagnosticsScreen(
                 Spacer(Modifier.height(16.dp))
                 WifiStrengthCard(r)
                 Spacer(Modifier.height(16.dp))
+                MobileSignalCard(r)
+                Spacer(Modifier.height(16.dp))
+                if (selected == 1) {
+                    SinrCard(r)
+                    Spacer(Modifier.height(16.dp))
+                }
                 ResponseCard(r)
                 Spacer(Modifier.height(16.dp))
                 SpeedTestsCard(r)
@@ -207,21 +214,6 @@ private fun NetworkCard(r: TestReport, onMoment: (Int) -> Unit) {
 
 // ------------------------------------------------------------------------------ charts
 
-private const val RSSI_TOP = -45.0
-private const val RSSI_BOTTOM = -90.0
-
-private fun DrawScope.series(pts: List<Pt>, x: (Double) -> Float, y: (Double) -> Float, color: Color, width: Float, maxGapS: Double, effect: PathEffect? = null) {
-    if (pts.isEmpty()) return
-    val path = Path()
-    var prev: Pt? = null
-    for (p in pts) {
-        val pv = prev
-        if (pv == null || p.tS - pv.tS > maxGapS) path.moveTo(x(p.tS), y(p.v)) else path.lineTo(x(p.tS), y(p.v))
-        prev = p
-    }
-    drawPath(path, color, style = Stroke(width, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = effect))
-}
-
 private fun valueAt(pts: List<Pt>, t: Double): Double? {
     if (pts.isEmpty()) return null
     val after = pts.indexOfFirst { it.tS >= t }
@@ -236,53 +228,67 @@ private fun valueAt(pts: List<Pt>, t: Double): Double? {
     }
 }
 
+private fun gapOf(r: TestReport) = maxOf(15.0, r.durationS / 30)
+
 @Composable
 private fun WifiStrengthCard(r: TestReport) {
-    val c = tc
     Card {
-        CardHeader("Wi-Fi strength") { Hint("○ = new access point") }
+        CardHeader("Wi-Fi signal") { Hint("○ = new access point") }
         Spacer(Modifier.height(14.dp))
-        if (r.wifiRssi.isEmpty() || r.durationS <= 0) {
-            Text("No Wi-Fi readings", style = TType.sub, color = tc.text3)
-            return@Card
-        }
-        val h = 170.dp
-        Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp))) {
-            Canvas(Modifier.fillMaxSize()) {
-                val third = size.height / 3
-                drawRect(c.veryGoodBg, Offset(0f, 0f), androidx.compose.ui.geometry.Size(size.width, third))
-                drawRect(c.averageBg, Offset(0f, third), androidx.compose.ui.geometry.Size(size.width, third))
-                drawRect(c.badBg, Offset(0f, 2 * third), androidx.compose.ui.geometry.Size(size.width, size.height - 2 * third))
-                val d = r.durationS
-                val x = { t: Double -> (t / d * size.width).toFloat() }
-                val y = { v: Double -> ((RSSI_TOP - v.coerceIn(RSSI_BOTTOM, RSSI_TOP)) / (RSSI_TOP - RSSI_BOTTOM) * size.height).toFloat() }
-                series(r.wifiRssi, x, y, c.wifi, 2.5.dp.toPx(), maxGapS = maxOf(15.0, d / 30))
-                val rad = 6.dp.toPx()
-                for (t in r.newApAtS) {
-                    val v = valueAt(r.wifiRssi, t) ?: continue
-                    val o = Offset(x(t), y(v))
-                    drawCircle(c.bg, rad, o)
-                    drawCircle(c.text, rad, o, style = Stroke(2.dp.toPx()))
-                }
-            }
-            BandLabel("Strong", c.veryGood, 0f, h)
-            BandLabel("OK", c.average, 1f / 3, h)
-            BandLabel("Weak", c.bad, 2f / 3, h)
-        }
+        val d = r.durationS.coerceAtLeast(1.0)
+        PresetChart(
+            Presets.wifiRssi(tc), listOf(ChartLine(r.wifiRssi, tc.wifi, maxGapS = gapOf(r))),
+            xMin = 0.0, xMax = d, height = 170.dp, markers = ChartText.switchTimes(r),
+            rings = r.newApAtS.mapNotNull { t -> valueAt(r.wifiRssi, t)?.let { ChartRing(t, it) } },
+            emptyReason = ChartText.wifi(r),
+        )
         Spacer(Modifier.height(8.dp))
         TickLabels(evenTicks(r.durationS), r.durationS)
     }
 }
 
 @Composable
-private fun BandLabel(text: String, color: Color, frac: Float, h: Dp) {
-    Text(text, style = TType.footnote.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = color,
-        modifier = Modifier.offset(x = 10.dp, y = h * frac + 6.dp))
+private fun MobileSignalCard(r: TestReport) {
+    Card {
+        CardHeader("Mobile signal") { Hint(listOfNotNull(r.mobileTech, r.mobileBand?.let { "band $it" }).joinToString(" · ")) }
+        Spacer(Modifier.height(14.dp))
+        val d = r.durationS.coerceAtLeast(1.0)
+        PresetChart(
+            Presets.rsrp(tc),
+            listOf(
+                ChartLine(r.rsrpSeries, tc.mobile, maxGapS = gapOf(r)),
+                ChartLine(r.nrRsrpSeries, tc.mobile, dashed = true, maxGapS = gapOf(r)),
+            ),
+            xMin = 0.0, xMax = d, height = 170.dp, markers = ChartText.switchTimes(r), emptyReason = ChartText.mobile(r),
+        )
+        Spacer(Modifier.height(8.dp))
+        TickLabels(evenTicks(r.durationS), r.durationS)
+        if (r.rsrpSeries.isNotEmpty() && (r.nrSeen || r.nrRsrpSeries.isNotEmpty())) {
+            Spacer(Modifier.height(10.dp))
+            ChartLegend(listOf(Triple("4G anchor", tc.mobile, false), Triple("5G (NR leg)", tc.mobile, true)))
+        }
+        ChartText.nr(r)?.let { Text(it, style = TType.footnote.copy(fontSize = 13.sp), color = tc.text3, modifier = Modifier.padding(top = 6.dp)) }
+    }
 }
 
 @Composable
+private fun SinrCard(r: TestReport) {
+    Card {
+        CardHeader("Mobile quality (SINR)") { Hint(r.sinrMedian?.let { "median ${it.roundToInt()} dB" } ?: "") }
+        Spacer(Modifier.height(14.dp))
+        PresetChart(
+            Presets.sinr(tc), listOf(ChartLine(r.sinrSeries, tc.mobile, maxGapS = gapOf(r))),
+            xMin = 0.0, xMax = r.durationS.coerceAtLeast(1.0), height = 140.dp, markers = ChartText.switchTimes(r),
+            emptyReason = ChartText.sinr(r),
+        )
+        Spacer(Modifier.height(8.dp))
+        TickLabels(evenTicks(r.durationS), r.durationS)
+    }
+}
+
+/** Response time per path: lower is better, good band at the bottom, slow region shaded at the top. */
+@Composable
 private fun ResponseCard(r: TestReport) {
-    val c = tc
     val all = r.responseMobile + r.responseWifi
     val mLo = r.responseMobileMinMs
     val mHi = r.responseMobileMaxMs
@@ -295,30 +301,15 @@ private fun ResponseCard(r: TestReport) {
         }
         CardHeader("Response time") { if (caption != null) Hint(caption) }
         Spacer(Modifier.height(14.dp))
-        if (all.isEmpty() || r.durationS <= 0) {
-            Text("No response checks", style = TType.sub, color = tc.text3)
-            return@Card
-        }
-        val yMax = maxOf(150.0, all.maxOf { it.v }) * 1.25
-        val h = 150.dp
-        Box(Modifier.fillMaxWidth().height(h)) {
-            Canvas(Modifier.fillMaxSize()) {
-                val d = r.durationS
-                val x = { t: Double -> (t / d * size.width).toFloat() }
-                val y = { v: Double -> (size.height * (1 - v.coerceIn(0.0, yMax) / yMax)).toFloat() }
-                val refY = y(150.0)
-                drawLine(c.veryGood, Offset(0f, refY), Offset(size.width, refY), strokeWidth = 1.5.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx())))
-                drawLine(c.sep, Offset(0f, size.height - 1), Offset(size.width, size.height - 1), strokeWidth = 1.dp.toPx())
-                val gap = maxOf(30.0, d / 20)
-                series(r.responseWifi, x, y, c.wifi, 2.5.dp.toPx(), gap)
-                series(r.responseMobile, x, y, c.mobile, 2.5.dp.toPx(), gap)
-            }
-            Text("150 ms", style = TType.footnote.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = c.veryGood,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth().offset(y = h * (1 - (150.0 / yMax).toFloat()) - 20.dp))
-        }
-        if (r.responseWifi.isNotEmpty() && r.responseMobile.isNotEmpty()) {
+        PresetChart(
+            Presets.response(tc, all.maxOfOrNull { it.v }),
+            listOf(ChartLine(r.responseWifi, tc.wifi, maxGapS = maxOf(30.0, r.durationS / 20)), ChartLine(r.responseMobile, tc.mobile, maxGapS = maxOf(30.0, r.durationS / 20))),
+            xMin = 0.0, xMax = r.durationS.coerceAtLeast(1.0), height = 160.dp, markers = ChartText.switchTimes(r),
+            emptyReason = ChartText.response(r),
+        )
+        Spacer(Modifier.height(8.dp))
+        TickLabels(evenTicks(r.durationS), r.durationS)
+        if (r.responseWifi.isNotEmpty() || r.responseMobile.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             CarrierLegend()
         }

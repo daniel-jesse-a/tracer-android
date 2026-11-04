@@ -28,6 +28,8 @@ data class LiveSnapshot(
     val pathStatus: String? = null,
     val rat: String? = null,
     val nrState: String? = null,
+    /** latest radio.carrier_aggregation JSON (component carriers; parse with Carriers.parse) */
+    val carrierAggregation: String? = null,
     val servingBySub: Map<Int, List<CellSample>> = emptyMap(),
     val neighboursBySub: Map<Int, List<CellSample>> = emptyMap(),
     val wifi: WifiConnectionSample? = null,
@@ -179,7 +181,7 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
                     neighboursBySub = sn.neighboursBySub + (sub to pendingNeigh[sub].orEmpty().sortedByDescending { it.rsrp ?: -200 }),
                 )
             }
-            is RadioSample -> sn = sn.copy(rat = s.rat, nrState = s.nrState)
+            is RadioSample -> sn = sn.copy(rat = s.rat, nrState = s.nrState, carrierAggregation = s.carrierAggregation ?: sn.carrierAggregation)
             is NetworkPathSample -> sn = sn.copy(transport = s.primaryInterface, pathStatus = s.status)
             is WifiConnectionSample -> {
                 sn = sn.copy(wifi = if (s.bssid == null && s.ssid == null) null else s)

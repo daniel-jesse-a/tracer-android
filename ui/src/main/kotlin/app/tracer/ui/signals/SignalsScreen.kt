@@ -21,7 +21,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.HorizontalDivider
@@ -56,9 +58,18 @@ import app.tracer.ui.panels.cleanSsid
 import app.tracer.ui.theme.TType
 import kotlin.math.roundToInt
 
-/** Design frame 3: mobile data, Wi-Fi and location, each on a 5-colour scale with a marker. */
+/**
+ * Design frame 3: mobile data, Wi-Fi, response and location, each on a 5-colour scale with a marker
+ * (scale always runs worse → better, left → right). Tapping a card opens its live detail screen.
+ */
 @Composable
-fun SignalsScreen(onBack: () -> Unit) {
+fun SignalsScreen(
+    onBack: () -> Unit,
+    onOpenWifi: () -> Unit = {},
+    onOpenMobile: () -> Unit = {},
+    onOpenResponse: () -> Unit = {},
+    onOpenLocation: () -> Unit = {},
+) {
     val vm: LiveRunViewModel = hiltViewModel()
     val snap by vm.snapshot.collectAsStateWithLifecycle()
     Screen {
@@ -66,11 +77,13 @@ fun SignalsScreen(onBack: () -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Spacer(Modifier.height(0.dp))
             val m = mobile(snap)
-            SignalCard(m, Icons.Outlined.SignalCellularAlt, tc.mobile)
+            SignalCard(m, Icons.Outlined.SignalCellularAlt, tc.mobile, onOpenMobile)
             val w = wifi(snap)
-            SignalCard(w, Icons.Outlined.Wifi, tc.wifi)
+            SignalCard(w, Icons.Outlined.Wifi, tc.wifi, onOpenWifi)
+            val r = response(snap)
+            SignalCard(r, Icons.Outlined.Schedule, tc.text, onOpenResponse)
             val l = location(snap)
-            SignalCard(l, Icons.Outlined.LocationOn, tc.text)
+            SignalCard(l, Icons.Outlined.LocationOn, tc.text, onOpenLocation)
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -108,6 +121,24 @@ private fun scale(v: Double?, edges: DoubleArray): Float? {
 private val RSRP_EDGES = doubleArrayOf(-125.0, -110.0, -100.0, -90.0, -80.0, -65.0)
 private val WIFI_EDGES = doubleArrayOf(-95.0, -80.0, -72.0, -65.0, -55.0, -35.0)
 private val POSITION_EDGES = doubleArrayOf(100.0, 50.0, 20.0, 8.0, 5.0, 1.0)
+/** Response ms: lower is better, so the scale runs 1000 ms (left, bad) → 0 ms (right, very good). */
+private val RESPONSE_EDGES = doubleArrayOf(1000.0, 600.0, 300.0, 150.0, 50.0, 0.0)
+
+private fun response(snap: LiveSnapshot): SignalUi {
+    val rtt = snap.latencyMs
+    val footer = listOfNotNull(
+        snap.medianLatencyMs?.let { "Median ${it.roundToInt()} ms" },
+        snap.jitterMs?.let { "jitter ${it.roundToInt()} ms" },
+        snap.lossPct?.let { "loss ${it.roundToInt()}%" },
+    ).joinToString(" · ").ifEmpty { "Waiting for the first check" }
+    return SignalUi(
+        title = "Response",
+        value = if (rtt != null) "${rtt.roundToInt()} ms" else "No reading",
+        verdict = Verdict.response(rtt),
+        position = scale(rtt, RESPONSE_EDGES),
+        low = "Slow", high = "Fast", footer = footer,
+    )
+}
 
 private fun mobile(snap: LiveSnapshot): SignalUi {
     val serving = snap.primaryServing
@@ -183,8 +214,8 @@ private fun location(snap: LiveSnapshot): SignalUi {
 private const val BETTER_AP_DB = 8
 
 @Composable
-private fun SignalCard(s: SignalUi, icon: ImageVector, iconTint: Color) {
-    Card(color = tc.bgOf(s.verdict), padding = PaddingValues(horizontal = 18.dp, vertical = 18.dp)) {
+private fun SignalCard(s: SignalUi, icon: ImageVector, iconTint: Color, onClick: () -> Unit) {
+    Card(color = tc.bgOf(s.verdict), padding = PaddingValues(horizontal = 18.dp, vertical = 18.dp), onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = iconTint, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
@@ -205,7 +236,12 @@ private fun SignalCard(s: SignalUi, icon: ImageVector, iconTint: Color) {
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(thickness = 0.5.dp, color = tc.meterOff)
         Spacer(Modifier.height(12.dp))
-        Text(s.footer, style = TType.sub, color = tc.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(s.footer, style = TType.sub, color = tc.text2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Text("Details", style = TType.label, color = tc.link)
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = tc.link, modifier = Modifier.size(20.dp))
+        }
     }
 }
 

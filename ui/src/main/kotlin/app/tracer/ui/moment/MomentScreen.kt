@@ -43,6 +43,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.tracer.core.report.Carrier
+import app.tracer.core.report.ChartText
 import app.tracer.core.report.Feedback
 import app.tracer.core.report.Moment
 import app.tracer.core.report.Plain
@@ -149,11 +150,22 @@ private fun StepArrow(left: Boolean, enabled: Boolean, onClick: () -> Unit) {
     )
 }
 
-private fun verdictFor(r: TestReport, c: Carrier?): Verdict = when (c) {
-    Carrier.WIFI -> r.wifiVerdict
-    Carrier.MOBILE -> r.mobileVerdict
-    Carrier.NONE -> Verdict.BAD
-    null -> Verdict.NONE
+/**
+ * Verdict of [c]'s signal in the 15 s before ([beforeMoment]) or after the moment, so "Wi-Fi dropped"
+ * is not shown as a Very good Wi-Fi tile just because the test's median was good. Falls back to the
+ * test median when there are no readings in that window.
+ */
+private fun verdictFor(r: TestReport, c: Carrier?, tS: Double, beforeMoment: Boolean): Verdict {
+    fun near(pts: List<Pt>): Double? {
+        val sel = pts.filter { if (beforeMoment) it.tS in (tS - 15)..tS else it.tS in tS..(tS + 15) }.map { it.v }.sorted()
+        return if (sel.isEmpty()) null else sel[sel.size / 2]
+    }
+    return when (c) {
+        Carrier.WIFI -> near(r.wifiRssi)?.let { Verdict.wifiRssi(it) } ?: r.wifiVerdict
+        Carrier.MOBILE -> near(r.rsrpSeries)?.let { Verdict.rsrp(it) } ?: r.mobileVerdict
+        Carrier.NONE -> Verdict.BAD
+        null -> Verdict.NONE
+    }
 }
 
 @Composable
@@ -171,13 +183,13 @@ private fun MomentBody(r: TestReport, m: Moment) {
     val after = m.after
     if (before != null || after != null) {
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
-            CarrierTile("Before", before, verdictFor(r, before), Modifier.weight(1f).fillMaxHeight())
+            CarrierTile("Before", before, verdictFor(r, before, m.tS, beforeMoment = true), Modifier.weight(1f).fillMaxHeight())
             Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = tc.text3, modifier = Modifier.padding(horizontal = 6.dp).size(22.dp))
-            CarrierTile("After", after, verdictFor(r, after), Modifier.weight(1f).fillMaxHeight())
+            CarrierTile("After", after, verdictFor(r, after, m.tS, beforeMoment = false), Modifier.weight(1f).fillMaxHeight())
         }
         Spacer(Modifier.height(16.dp))
     }
-    StrengthWindow(r, m)
+    SignalWindow(r, m)
     Spacer(Modifier.height(16.dp))
     Card {
         Text("Likely cause", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3)
@@ -204,66 +216,65 @@ private fun CarrierTile(label: String, c: Carrier?, v: Verdict, modifier: Modifi
 }
 
 private const val WIN_S = 30.0
-private const val TOP = -45.0
-private const val BOTTOM = -95.0
 
-/** A Wi-Fi-equivalent level for a verdict, so mobile can be drawn on the same scale after a switch. */
-private fun levelOf(v: Verdict): Double = when (v) {
-    Verdict.VERY_GOOD -> -52.0; Verdict.ABOVE_AVG -> -60.0; Verdict.AVERAGE -> -68.0
-    Verdict.BELOW_AVG -> -76.0; Verdict.BAD -> -86.0; Verdict.NONE -> -68.0
+/**
+ * ±30 s around the moment: Wi-Fi signal (blue), mobile signal (orange; 5G leg dashed) and response
+ * time per path, each in its own frame. Carrier switches are dotted verticals, the moment a dashed
+ * one. An empty frame says why it is empty (not tested / no readings / not reported).
+ */
+@Composable
+private fun SignalWindow(r: TestReport, m: Moment) {
+    val t0 = m.tS - WIN_S
+    val t1 = m.tS + WIN_S
+    val switches = ChartText.switchTimes(r)
+    val xLabels = listOf(t0 to "−30 s", m.tS to "moment", t1 to "+30 s")
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Around this moment", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3, modifier = Modifier.weight(1f))
+            Text("±30 s", style = TType.footnote.copy(fontSize = 14.sp).merge(TType.num), color = tc.text3)
+        }
+        Spacer(Modifier.height(12.dp))
+        ChartLabel("Wi-Fi signal")
+        PresetChart(
+            Presets.wifiRssi(tc), listOf(ChartLine(r.wifiRssi, tc.wifi, maxGapS = 8.0)),
+            xMin = t0, xMax = t1, height = 110.dp, markers = switches, cursorX = m.tS,
+            emptyReason = ChartText.wifi(r, t0, t1), showCaption = false,
+        )
+        Spacer(Modifier.height(14.dp))
+        ChartLabel("Mobile signal")
+        val nrNote = ChartText.nr(r)
+        PresetChart(
+            Presets.rsrp(tc),
+            listOf(ChartLine(r.rsrpSeries, tc.mobile, maxGapS = 8.0), ChartLine(r.nrRsrpSeries, tc.mobile, dashed = true, maxGapS = 8.0)),
+            xMin = t0, xMax = t1, height = 110.dp, markers = switches, cursorX = m.tS,
+            emptyReason = ChartText.mobile(r, t0, t1), showCaption = false,
+        )
+        if (nrNote != null) Text(nrNote, style = TType.footnote.copy(fontSize = 13.sp), color = tc.text3, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(14.dp))
+        ChartLabel("Response time")
+        val inWin = (r.responseWifi + r.responseMobile).filter { it.tS in t0..t1 }
+        PresetChart(
+            Presets.response(tc, inWin.maxOfOrNull { it.v }),
+            listOf(ChartLine(r.responseWifi, tc.wifi, maxGapS = 20.0), ChartLine(r.responseMobile, tc.mobile, maxGapS = 20.0)),
+            xMin = t0, xMax = t1, height = 110.dp, markers = switches, cursorX = m.tS,
+            emptyReason = ChartText.response(r, t0, t1), xLabels = xLabels,
+        )
+        Spacer(Modifier.height(10.dp))
+        ChartLegend(buildList {
+            add(Triple("Wi-Fi", tc.wifi, false))
+            add(Triple("Mobile", tc.mobile, false))
+            if (r.nrRsrpSeries.isNotEmpty()) add(Triple("5G", tc.mobile, true))
+        })
+        if (switches.any { it in t0..t1 }) {
+            Spacer(Modifier.height(4.dp))
+            Text("Dotted line = network switch", style = TType.footnote.copy(fontSize = 13.sp), color = tc.text3)
+        }
+    }
 }
 
 @Composable
-private fun StrengthWindow(r: TestReport, m: Moment) {
-    val c = tc
-    val t0 = m.tS - WIN_S
-    val t1 = m.tS + WIN_S
-    val pts = r.wifiRssi.filter { it.tS in t0..t1 }
-    val mobileAfter = m.after == Carrier.MOBILE && m.before != Carrier.MOBILE
-    val mobileUntil = minOf(t1, m.tS + (m.lastedS ?: WIN_S))
-    Card {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Wi-Fi strength", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3, modifier = Modifier.weight(1f))
-            Text("±30 s", style = TType.footnote.copy(fontSize = 14.sp).merge(TType.num), color = tc.text3)
-        }
-        Spacer(Modifier.height(14.dp))
-        if (pts.isEmpty() && !mobileAfter) {
-            Text("No Wi-Fi readings around this moment", style = TType.sub, color = tc.text3)
-            return@Card
-        }
-        Canvas(Modifier.fillMaxWidth().height(140.dp)) {
-            val x = { t: Double -> ((t - t0) / (t1 - t0) * size.width).toFloat() }
-            val y = { v: Double -> ((TOP - v.coerceIn(BOTTOM, TOP)) / (TOP - BOTTOM) * size.height).toFloat() }
-            // bad band (≤ −80 dBm)
-            val badTop = y(-80.0)
-            drawRect(c.chartBad, Offset(0f, badTop), Size(size.width, size.height - badTop))
-            val w = 2.5.dp.toPx()
-            val solid = Stroke(w, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            fun line(sel: List<Pt>) {
-                if (sel.isEmpty()) return
-                val p = Path()
-                var prevT: Double? = null
-                for (pt in sel) {
-                    val pv = prevT
-                    if (pv == null || pt.tS - pv > 8) p.moveTo(x(pt.tS), y(pt.v)) else p.lineTo(x(pt.tS), y(pt.v))
-                    prevT = pt.tS
-                }
-                drawPath(p, c.wifi, style = solid)
-            }
-            if (mobileAfter) {
-                line(pts.filter { it.tS <= m.tS })
-                line(pts.filter { it.tS >= mobileUntil })
-                val ly = y(levelOf(r.mobileVerdict))
-                drawLine(c.mobile, Offset(x(m.tS), ly), Offset(x(mobileUntil), ly), strokeWidth = w, cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(0.1f, 3.dp.toPx() + w)))
-            } else {
-                line(pts)
-            }
-            val mx = x(m.tS)
-            drawLine(c.text2, Offset(mx, 0f), Offset(mx, size.height), strokeWidth = 1.5.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
-        }
-    }
+private fun ChartLabel(text: String) {
+    Text(text, style = TType.label, color = tc.text2, modifier = Modifier.padding(bottom = 6.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

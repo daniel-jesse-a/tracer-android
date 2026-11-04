@@ -193,7 +193,7 @@ private fun rememberReplaySeries(d: ReplayData, t: LaneText): List<ChartSeries> 
             add(SeriesFactory.wifiRssi(t.wifi, d.wifi.xs, d.wifi.ys, c, t.noWifi))
             add(SeriesFactory.satellites(t.gnss, d.gnssUsed.xs, d.gnssUsed.ys, c, t.noGnss))
             d.linkedLatency?.let {
-                add(NumericSeries(t.linkedLat, "ms", it.xs, it.ys, 0f, 400f, c.linkedRun, threshold = 250f, failed = it.failed))
+                add(NumericSeries(t.linkedLat, "ms", it.xs, it.ys, 0f, 400f, c.linkedRun, threshold = 250f, failed = it.failed, higherIsBetter = false))
             }
             d.linkedRsrp?.let { add(NumericSeries(t.linkedRsrp, "dBm", it.xs, it.ys, -140f, -44f, c.linkedRun, threshold = -110f)) }
         }
