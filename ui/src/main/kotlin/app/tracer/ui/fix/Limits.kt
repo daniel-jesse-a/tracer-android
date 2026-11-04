@@ -261,6 +261,7 @@ fun launchFirst(context: Context, intents: List<Intent>): Boolean {
 }
 
 /** System state probes. All are cheap and safe to call every second. */
+@SuppressLint("MissingPermission") // ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE are declared in :app
 object Checks {
     fun developerOptions(c: Context): Boolean =
         Settings.Global.getInt(c.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
