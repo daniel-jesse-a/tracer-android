@@ -50,14 +50,27 @@ fun TestSummaryScreen(
     val vm: TestSummaryViewModel = hiltViewModel()
     LaunchedEffect(runId) { vm.bind(runId) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val delivery by vm.delivery.collectAsStateWithLifecycle()
+    val email by vm.email.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(email) {
+        val intent = email ?: return@LaunchedEffect
+        try { context.startActivity(intent); vm.emailLaunched() }
+        catch (e: android.content.ActivityNotFoundException) { vm.emailFailed("No email app is set up on this phone") }
+    }
     Screen {
         TopLinks(back = "Tests", onBack = onBack, action = "Share", onAction = onShare)
-        ReportGate(state) { _, r -> SummaryBody(r, onShare, onDiagnostics, onMoment) }
+        ReportGate(state) { _, r ->
+            SummaryBody(r, onShare, onDiagnostics, onMoment, delivery, onDownload = vm::download, onEmail = { vm.email() })
+        }
     }
 }
 
 @Composable
-private fun ColumnScope.SummaryBody(r: TestReport, onShare: () -> Unit, onDiagnostics: () -> Unit, onMoment: (Int) -> Unit) {
+private fun ColumnScope.SummaryBody(
+    r: TestReport, onShare: () -> Unit, onDiagnostics: () -> Unit, onMoment: (Int) -> Unit,
+    delivery: Delivery, onDownload: () -> Unit, onEmail: () -> Unit,
+) {
     Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
         TitleBlock(eyebrow = eyebrowOf(r), title = r.headline)
 
@@ -133,7 +146,22 @@ private fun ColumnScope.SummaryBody(r: TestReport, onShare: () -> Unit, onDiagno
         Spacer(Modifier.height(20.dp))
         Pill("Full diagnostics", onDiagnostics, Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Pill("Download", onDownload, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
+            Pill("Email", onEmail, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
+        }
+        Spacer(Modifier.height(12.dp))
         Pill("Share report", onShare, Modifier.fillMaxWidth(), kind = PillKind.SECONDARY_BLUE)
+        val dt = delivery.text
+        if (dt != null) {
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (delivery.busy) CircularProgressIndicator(Modifier.size(16.dp), color = tc.link, strokeWidth = 2.dp)
+                else Dot(if (delivery.failed) tc.bad else tc.veryGood, 8.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(dt, style = TType.footnote.copy(fontSize = 14.sp), color = if (delivery.failed) tc.bad else tc.text2)
+            }
+        }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.navigationBarsPadding())
     }

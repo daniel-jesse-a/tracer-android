@@ -95,6 +95,9 @@ fun SettingsScreen(
     val lengthMin by viewModel.defaultLengthMin.collectAsStateWithLifecycle()
     val movement by viewModel.defaultMovement.collectAsStateWithLifecycle()
     val linked by viewModel.linkedDevices.collectAsStateWithLifecycle()
+    val autoEmail by viewModel.autoEmail.collectAsStateWithLifecycle()
+    val recipients by viewModel.emailRecipients.collectAsStateWithLifecycle()
+    val emailZip by viewModel.emailZip.collectAsStateWithLifecycle()
 
     var picker by remember { mutableStateOf<PickerSpec?>(null) }
     var number by remember { mutableStateOf<NumberSpec?>(null) }
@@ -144,6 +147,19 @@ fun SettingsScreen(
                 ListRow("Battery saver", trailing = {
                     Toggle(s?.batterySaver == true) { on -> viewModel.update { it.copy(batterySaver = on) } }
                 })
+            }
+
+            Caption("Email reports")
+            Group {
+                ToggleRow("Email after each test", "Opens a ready-to-send email with the report when a test ends", autoEmail) { viewModel.setAutoEmail(it) }
+                Sep()
+                ListRow("Recipients", if (recipients.size == 1) recipients[0] else "${recipients.size} people", onClick = {
+                    text = TextSpec("Recipients (comma separated)", recipients.joinToString(", "), false) { v ->
+                        viewModel.setEmailRecipients(v.split(',', ';', ' ', '\n').map { it.trim() }.filter { it.contains('@') })
+                    }
+                })
+                Sep()
+                ToggleRow("Attach full data", "ZIP for engineers, when under 17 MB", emailZip) { viewModel.setEmailZip(it) }
             }
 
             Caption("Companions")

@@ -99,6 +99,31 @@ class SettingsRepository @Inject constructor(
     val welcomed: Flow<Boolean> = safeData.map { it[KEY_WELCOMED] == "1" }.distinctUntilChanged()
     suspend fun setWelcomed() { store.edit { it[KEY_WELCOMED] = "1" } }
 
+    // ---- email reports (auto step after each test)
+
+    /** Open a pre-filled email with the report after each test (Android needs one tap on Send). */
+    val autoEmail: Flow<Boolean> = safeData.map { it[KEY_AUTO_EMAIL] != "0" }.distinctUntilChanged()
+    suspend fun setAutoEmail(on: Boolean) { store.edit { it[KEY_AUTO_EMAIL] = if (on) "1" else "0" } }
+
+    /** Comma-separated recipients. */
+    val emailRecipients: Flow<List<String>> = safeData.map { p ->
+        (p[KEY_EMAIL_TO] ?: DEFAULT_EMAIL_TO).split(',', ';', ' ', '\n').map { it.trim() }.filter { it.contains('@') }
+    }.distinctUntilChanged()
+    suspend fun setEmailRecipients(list: List<String>) { store.edit { it[KEY_EMAIL_TO] = list.joinToString(",") } }
+
+    /** Attach the full-data ZIP when it fits the mail size limit. */
+    val emailZip: Flow<Boolean> = safeData.map { it[KEY_EMAIL_ZIP] != "0" }.distinctUntilChanged()
+    suspend fun setEmailZip(on: Boolean) { store.edit { it[KEY_EMAIL_ZIP] = if (on) "1" else "0" } }
+
+    /** Runs whose report email was already opened (so it happens once per test). */
+    val emailedRuns: Flow<Set<String>> = safeData.map { (it[KEY_EMAILED] ?: "").split(',').filter { s -> s.isNotBlank() }.toSet() }
+    suspend fun markEmailed(runId: String) {
+        store.edit { p ->
+            val cur = (p[KEY_EMAILED] ?: "").split(',').filter { it.isNotBlank() }
+            p[KEY_EMAILED] = (cur.takeLast(199) + runId).distinct().joinToString(",")
+        }
+    }
+
     private fun decode(json: String?): RunSettings =
         json?.let { runCatching { RunSettings.fromJson(it) }.onFailure { e -> Log.w(TAG, "corrupt settings json", e) }.getOrNull() }
             ?: RunSettings()
@@ -115,5 +140,10 @@ class SettingsRepository @Inject constructor(
         val KEY_MOVEMENT = stringPreferencesKey("ui_default_movement")
         val KEY_START_COMPANIONS = stringPreferencesKey("ui_start_companions")
         val KEY_WELCOMED = stringPreferencesKey("ui_welcomed")
+        val KEY_AUTO_EMAIL = stringPreferencesKey("email_auto")
+        val KEY_EMAIL_TO = stringPreferencesKey("email_to")
+        val KEY_EMAIL_ZIP = stringPreferencesKey("email_zip")
+        val KEY_EMAILED = stringPreferencesKey("email_done_runs")
+        const val DEFAULT_EMAIL_TO = "daniel.alphonsus@etihadrail.ae,eric.artau@etihadrail.ae"
     }
 }

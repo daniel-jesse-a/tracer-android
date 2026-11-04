@@ -13,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.IosShare
@@ -45,10 +47,17 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val ui by vm.ui.collectAsStateWithLifecycle()
     val pending by vm.pendingShare.collectAsStateWithLifecycle()
+    val pendingEmail by vm.pendingEmail.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         if (uri != null) vm.saveToTree(uri)
+    }
+
+    LaunchedEffect(pendingEmail) {
+        val intent = pendingEmail ?: return@LaunchedEffect
+        try { context.startActivity(intent); vm.shareLaunched() }
+        catch (e: ActivityNotFoundException) { vm.shareFailed("No email app is set up on this phone") }
     }
 
     LaunchedEffect(pending) {
@@ -87,10 +96,22 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 SendItem(Icons.Outlined.Inventory2, "Full data", "ZIP · for engineers", ui.zip, vm::toggleZip)
                 Caption("Send to")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap)) {
+                    DestCard(Icons.Outlined.Download, "Download", ui.dest == ShareDest.DOWNLOAD, true, Modifier.weight(1f)) { vm.setDest(ShareDest.DOWNLOAD) }
+                    DestCard(Icons.Outlined.Email, "Email", ui.dest == ShareDest.EMAIL, ui.recipients.isNotEmpty(), Modifier.weight(1f)) { vm.setDest(ShareDest.EMAIL) }
                     DestCard(Icons.Outlined.IosShare, "Share…", ui.dest == ShareDest.SHARE, true, Modifier.weight(1f)) { vm.setDest(ShareDest.SHARE) }
+                }
+                Spacer(Modifier.height(K.gap))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap)) {
                     DestCard(Icons.Outlined.Folder, "Files", ui.dest == ShareDest.FILES, true, Modifier.weight(1f)) { vm.setDest(ShareDest.FILES) }
                     DestCard(Icons.Outlined.Dns, "Server", ui.dest == ShareDest.SERVER, ui.uploadUrl != null, Modifier.weight(1f)) { vm.setDest(ShareDest.SERVER) }
+                    Spacer(Modifier.weight(1f))
                 }
+                val hint = when (ui.dest) {
+                    ShareDest.DOWNLOAD -> "Saves to Downloads/Tracer on this phone."
+                    ShareDest.EMAIL -> "To ${ui.recipients.joinToString()} · change in Settings › Email reports."
+                    else -> null
+                }
+                if (hint != null) Text(hint, style = TType.footnote.copy(fontSize = 14.sp), color = tc.text3, modifier = Modifier.padding(start = 4.dp, top = 10.dp))
                 if (ui.uploadUrl == null) {
                     Text("Server: set an upload URL in Settings to send tests to a server.", style = TType.footnote.copy(fontSize = 14.sp),
                         color = tc.text3, modifier = Modifier.padding(start = 4.dp, top = 10.dp))
@@ -111,7 +132,10 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 Text(result, style = TType.sub, color = if (ui.failed) tc.bad else tc.veryGood, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
             }
-            val verb = when (ui.dest) { ShareDest.SHARE -> "Share"; ShareDest.FILES -> "Save"; ShareDest.SERVER -> "Send" }
+            val verb = when (ui.dest) {
+                ShareDest.DOWNLOAD -> "Download"; ShareDest.EMAIL -> "Email"
+                ShareDest.SHARE -> "Share"; ShareDest.FILES -> "Save"; ShareDest.SERVER -> "Send"
+            }
             val n = ui.count
             Pill(
                 "$verb $n ${if (n == 1) "item" else "items"}",

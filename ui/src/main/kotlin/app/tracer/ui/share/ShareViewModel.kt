@@ -6,8 +6,6 @@ import android.provider.DocumentsContract
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import app.tracer.core.model.RunRecord
-import app.tracer.core.report.Comparison
-import app.tracer.core.report.ReportJson
 import app.tracer.core.report.TestReport
 import app.tracer.core.runtime.BundleService
 import app.tracer.core.runtime.RunRepository
@@ -25,22 +23,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.io.File
 import javax.inject.Inject
 
-enum class ShareDest { SHARE, FILES, SERVER }
+enum class ShareDest { DOWNLOAD, EMAIL, SHARE, FILES, SERVER }
 
 data class ShareUi(
     val pdf: Boolean = true,
     val summary: Boolean = true,
     val zip: Boolean = false,
-    val dest: ShareDest = ShareDest.SHARE,
+    val dest: ShareDest = ShareDest.DOWNLOAD,
+    val recipients: List<String> = emptyList(),
     /** null = no server configured (Settings › Upload URL) */
     val uploadUrl: String? = null,
     val busy: Boolean = false,
@@ -60,9 +53,14 @@ class ShareViewModel @Inject constructor(
     runs: RunRepository,
     private val bundles: BundleService,
     private val settings: SettingsRepository,
+    private val files: ShareFiles,
 ) : ReportViewModel(reports, runs) {
 
     val authority: String get() = bundles.fileProviderAuthority
+
+    /** Email composer ready to launch; the screen starts it and calls [shareLaunched]. */
+    private val _pendingEmail = MutableStateFlow<android.content.Intent?>(null)
+    val pendingEmail: StateFlow<android.content.Intent?> = _pendingEmail.asStateFlow()
 
     private val _ui = MutableStateFlow(ShareUi())
     val ui: StateFlow<ShareUi> = _ui.asStateFlow()
@@ -76,6 +74,7 @@ class ShareViewModel @Inject constructor(
             val url = runCatching { settings.settings.first().uploadUrl }.getOrNull()?.takeIf { it.isNotBlank() }
             _ui.update { it.copy(uploadUrl = url) }
         }
+        viewModelScope.launch { settings.emailRecipients.collect { to -> _ui.update { it.copy(recipients = to) } } }
     }
 
     fun togglePdf() = _ui.update { if (it.busy) it else it.copy(pdf = !it.pdf, result = null) }
@@ -93,6 +92,20 @@ class ShareViewModel @Inject constructor(
         val u = _ui.value
         if (u.busy || u.count == 0) return
         when (u.dest) {
+            ShareDest.DOWNLOAD -> job("Downloaded") { list ->
+                status("Saving to Downloads…", null)
+                val where = files.saveToDownloads(list)
+                "Saved ${items(list.size)} to $where"
+            }.invoke(run, report)
+            ShareDest.EMAIL -> job("Emailed") { list ->
+                val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
+                val note = if (big.isNotEmpty()) {
+                    val where = files.saveToDownloads(big)
+                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email — saved to $where on the phone."
+                } else null
+                _pendingEmail.value = files.emailIntent(run, report, list - big.toSet(), u.recipients, note)
+                "Opened email to ${u.recipients.joinToString()}"
+            }.invoke(run, report)
             ShareDest.SHARE -> job("Shared") { files ->
                 _pendingShare.value = files
                 "Opened the share sheet with ${items(files.size)}"
@@ -133,10 +146,10 @@ class ShareViewModel @Inject constructor(
         }.invoke(run, report)
     }
 
-    fun shareLaunched() { _pendingShare.value = null }
+    fun shareLaunched() { _pendingShare.value = null; _pendingEmail.value = null }
 
     fun shareFailed(message: String) {
-        _pendingShare.value = null
+        _pendingShare.value = null; _pendingEmail.value = null
         _ui.update { it.copy(result = message, failed = true) }
     }
 
@@ -156,58 +169,13 @@ class ShareViewModel @Inject constructor(
 
     private fun status(s: String, p: Float?) = _ui.update { it.copy(status = s, progress = p) }
 
-    /** Writes the selected items into cacheDir/exports/share-<runId>/ (covered by the export FileProvider). */
     private suspend fun prepare(run: RunRecord, r: TestReport): List<File> {
         val u = _ui.value
-        val dir = File(context.cacheDir, "exports/share-${safe(run.runId)}")
-        withContext(Dispatchers.IO) { dir.deleteRecursively(); dir.mkdirs() }
-        val base = ReportPdf.baseName(run, run.runId)
-        val out = mutableListOf<File>()
-        if (u.pdf) {
-            status("Making the report…", null)
-            val f = File(dir, ReportPdf.fileName(run, run.runId))
-            withContext(Dispatchers.Default) { ReportPdf.write(r, run, f) }
-            out += f
-        }
-        if (u.summary) {
-            status("Writing the summary…", null)
-            val compare = runCatching { compareJson(run, r) }.onFailure { Log.w(TAG, "comparison failed", it) }.getOrNull()
-            val obj = ReportJson.encode(r).let { if (compare != null) JsonObject(it + ("compare" to compare)) else it }
-            val f = File(dir, "${base}_summary.json")
-            withContext(Dispatchers.IO) { f.writeText(PRETTY.encodeToString(JsonObject.serializer(), obj)) }
-            out += f
-        }
-        if (u.zip) {
-            status("Packing the full data…", 0f)
-            val f = bundles.export(run.runId) { p -> _ui.update { it.copy(progress = p.coerceIn(0f, 1f)) } }
-            out += f
-        }
-        status("Ready", null)
-        return out
-    }
-
-    /** Comparison vs the earliest earlier test at the same site, if any. */
-    private suspend fun compareJson(run: RunRecord, r: TestReport): JsonObject? {
-        val site = run.site ?: return null
-        val candidates = runs.observeRuns().first().map { it.run }
-            .filter { it.site.equals(site, ignoreCase = true) && it.runId != run.runId && it.endedAt != null && it.startedAt < run.startedAt }
-        val older = reports.reports(candidates).minByOrNull { it.first.startedAt } ?: return null
-        fun label(x: RunRecord) = x.testNumber?.let { "Test $it" } ?: x.name
-        val c = Comparison(r, older.second, label(run), label(older.first))
-        return buildJsonObject {
-            put("newer", c.newerLabel)
-            put("older", c.olderLabel)
-            put("older_run_id", older.first.runId)
-            put("checks_passed_before", c.checksBefore)
-            put("checks_passed_after", c.checksAfter)
-            put("improved", c.improved)
-            put("deltas", buildJsonArray { c.deltas.forEach { add(it) } })
-        }
+        return files.prepare(run, r, u.pdf, u.summary, u.zip) { st, p -> status(st, p) }
     }
 
     private companion object {
         const val TAG = "Share"
-        val PRETTY = Json { prettyPrint = true }
         fun safe(s: String) = s.replace(Regex("[^A-Za-z0-9_-]+"), "_")
         fun items(n: Int) = if (n == 1) "1 item" else "$n items"
     }
