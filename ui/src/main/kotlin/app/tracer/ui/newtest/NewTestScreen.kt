@@ -109,11 +109,15 @@ fun NewTestScreen(
     val startCompanions by vm.startCompanions.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
+    val guides = app.tracer.ui.fix.LocalGuides.current
     val onFix: (FixAction) -> Unit = { fix ->
         when (fix) {
-            FixAction.PERMISSIONS -> onFixPermissions()
-            FixAction.LOCATION_SETTINGS -> openSettings(context, Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-            FixAction.BATTERY -> openBatteryExemption(context)
+            FixAction.PERMISSIONS -> guides.limits.firstOrNull {
+                it in setOf(app.tracer.ui.fix.Limit.LOCATION_PERMISSION, app.tracer.ui.fix.Limit.LOCATION_APPROXIMATE,
+                    app.tracer.ui.fix.Limit.BACKGROUND_LOCATION, app.tracer.ui.fix.Limit.PHONE_PERMISSION, app.tracer.ui.fix.Limit.NEARBY_WIFI)
+            }?.let { guides.open(it) } ?: onFixPermissions()
+            FixAction.LOCATION_SETTINGS -> guides.open(app.tracer.ui.fix.Limit.LOCATION_OFF)
+            FixAction.BATTERY -> if (!app.tracer.ui.onboarding.Permissions.batteryExempt(context)) guides.open(app.tracer.ui.fix.Limit.BATTERY_OPTIMISED) else openBatteryExemption(context)
             FixAction.RETRY_ENDPOINTS -> vm.checkEndpoints()
             FixAction.COMPANION -> onOpenCompanions()
             FixAction.STORAGE -> openSettings(context, Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
@@ -130,6 +134,16 @@ fun NewTestScreen(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
             ReadinessCard(r, onFix)
+            // phone settings that limit the result (scan throttling, data saver, …) not covered by the checks above
+            val extra = guides.limits.filter {
+                it.severity != app.tracer.ui.fix.Severity.NOTE || it == app.tracer.ui.fix.Limit.POWER_SAVER
+            }
+            if (extra.isNotEmpty()) {
+                Spacer(Modifier.height(K.gap))
+                GroupCard(rows = extra.map<app.tracer.ui.fix.Limit, @Composable () -> Unit> { l ->
+                    { ListRow(l.title, sub = l.short, value = "Fix", onClick = { guides.open(l) }, leading = { Dot(tc.belowAvg, 10.dp) }) }
+                }, inset = 42.dp)
+            }
 
             Caption("Where")
             Card(padding = PaddingValues(horizontal = 18.dp, vertical = 0.dp)) {

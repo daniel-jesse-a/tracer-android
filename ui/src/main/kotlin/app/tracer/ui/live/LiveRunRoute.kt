@@ -116,6 +116,7 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSignals: () -> Unit,
     var showDetails by rememberSaveable { mutableStateOf(false) }
     val active = state == RunState.RECORDING || state == RunState.PAUSED
     val context = LocalContext.current
+    val guides = app.tracer.ui.fix.LocalGuides.current
 
     Screen {
         LiveHeader(run, state, snap.elapsedMs, limitMs)
@@ -158,7 +159,7 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSignals: () -> Unit,
             if (banners.isNotEmpty()) {
                 Spacer(Modifier.height(K.gap))
                 Card(padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
-                    banners.forEach { b -> BannerLine(b) { fix -> openFix(context, fix, onOpenSettings) } }
+                    banners.forEach { b -> BannerLine(b) { fix -> if (!guides.openForCollector(fix)) openFix(context, fix, onOpenSettings) } }
                 }
             }
 

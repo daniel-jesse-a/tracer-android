@@ -34,6 +34,8 @@ import app.tracer.core.model.RunState
 import app.tracer.core.runtime.RunController
 import app.tracer.ui.companion.CompanionsScreen
 import app.tracer.ui.diagnostics.DiagnosticsScreen
+import app.tracer.ui.fix.GuidedFixHost
+import app.tracer.ui.fix.PhoneSetupScreen
 import app.tracer.ui.kit.tc
 import app.tracer.ui.library.RunLibraryScreen
 import app.tracer.ui.live.LiveRunRoute
@@ -77,6 +79,7 @@ object Routes {
     const val MOMENT = "moment/{runId}/{index}"
     const val SHARE = "share/{runId}"
     const val COMPANIONS = "companions"
+    const val PHONE_SETUP = "phonesetup"
     // engineer view
     const val LIBRARY = "library"
     const val REPLAY = "replay/{runId}?atMonoNs={atMonoNs}"
@@ -147,6 +150,7 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
             }
         },
     ) { padding ->
+      GuidedFixHost(autoPopups = currentRoute != null && currentRoute != Routes.WELCOME) {
         NavHost(
             navController = nav,
             startDestination = start,
@@ -223,6 +227,7 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
                     onBack = if (pushed) ({ nav.popBackStack(); Unit }) else null,
                     onOpenCompanions = { nav.navigate(Routes.COMPANIONS) },
                     onOpenLibrary = { nav.navigate(Routes.LIBRARY) },
+                    onOpenPhoneSetup = { nav.navigate(Routes.PHONE_SETUP) },
                 )
             }
             composable(Routes.COMPANIONS) {
@@ -261,7 +266,9 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
             composable(Routes.TRANSFER, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
                 TransferScreen(runId = e.arguments?.getString("runId").orEmpty(), onBack = { nav.popBackStack() })
             }
+            composable(Routes.PHONE_SETUP) { PhoneSetupScreen(onBack = { nav.popBackStack() }) }
         }
+      }
     }
 }
 

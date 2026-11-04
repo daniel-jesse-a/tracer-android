@@ -85,6 +85,7 @@ fun SettingsScreen(
     onBack: (() -> Unit)?,
     onOpenCompanions: () -> Unit,
     onOpenLibrary: () -> Unit,
+    onOpenPhoneSetup: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -114,6 +115,13 @@ fun SettingsScreen(
             Segmented(THEMES.map { it.second }, themeIdx, { i -> viewModel.setThemeMode(THEMES[i].first) })
 
             val s = settings
+
+            val limits = app.tracer.ui.fix.LocalGuides.current.limits
+            Caption("Phone")
+            Group {
+                ListRow("Phone setup", if (limits.isEmpty()) "All set" else "${limits.size} to fix", onClick = onOpenPhoneSetup,
+                    leading = { Dot(if (limits.isEmpty()) tc.veryGood else tc.belowAvg, 10.dp) })
+            }
 
             Caption("Test defaults")
             Group {

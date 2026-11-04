@@ -124,6 +124,16 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    /** Guided-fix popups the user asked not to show again (Limit names). */
+    val mutedLimits: Flow<Set<String>> = safeData.map { (it[KEY_MUTED_LIMITS] ?: "").split(',').filter { s -> s.isNotBlank() }.toSet() }
+    suspend fun setLimitMuted(name: String, muted: Boolean) {
+        store.edit { p ->
+            val cur = (p[KEY_MUTED_LIMITS] ?: "").split(',').filter { it.isNotBlank() }.toMutableSet()
+            if (muted) cur += name else cur -= name
+            p[KEY_MUTED_LIMITS] = cur.joinToString(",")
+        }
+    }
+
     private fun decode(json: String?): RunSettings =
         json?.let { runCatching { RunSettings.fromJson(it) }.onFailure { e -> Log.w(TAG, "corrupt settings json", e) }.getOrNull() }
             ?: RunSettings()
@@ -144,6 +154,7 @@ class SettingsRepository @Inject constructor(
         val KEY_EMAIL_TO = stringPreferencesKey("email_to")
         val KEY_EMAIL_ZIP = stringPreferencesKey("email_zip")
         val KEY_EMAILED = stringPreferencesKey("email_done_runs")
+        val KEY_MUTED_LIMITS = stringPreferencesKey("fix_muted_limits")
         const val DEFAULT_EMAIL_TO = "daniel.alphonsus@etihadrail.ae,eric.artau@etihadrail.ae"
     }
 }
