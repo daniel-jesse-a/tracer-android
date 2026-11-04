@@ -24,21 +24,26 @@ EXTRA_MAIN=(
   collectors/src/main/kotlin/app/tracer/collectors/MotionAggregator.kt
   probes/src/main/kotlin/app/tracer/probes/ProbeLogic.kt
   probes/src/main/kotlin/app/tracer/probes/InternalProbeLogic.kt
+  probes/src/main/kotlin/app/tracer/probes/IntegrityLogic.kt
   probes/src/main/kotlin/app/tracer/probes/Sntp.kt
   probes/src/main/kotlin/app/tracer/probes/TowerCache.kt
   pairing/src/main/kotlin/app/tracer/pairing/SampleStamps.kt
   app/src/main/kotlin/app/tracer/run/SampleRestamp.kt
+  app/src/main/kotlin/app/tracer/run/StallDetector.kt
   ui/src/main/kotlin/app/tracer/ui/components/chart/Decimation.kt
   ui/src/main/kotlin/app/tracer/ui/event/EventJson.kt
 )
 EXTRA_TEST=(
   collectors/src/test/kotlin/app/tracer/collectors/MappingsTest.kt
   collectors/src/test/kotlin/app/tracer/collectors/MotionAggregatorTest.kt
+  collectors/src/test/kotlin/app/tracer/collectors/SpeedFilterTest.kt
   probes/src/test/kotlin/app/tracer/probes/ProbeLogicTest.kt
   probes/src/test/kotlin/app/tracer/probes/InternalProbeLogicTest.kt
+  probes/src/test/kotlin/app/tracer/probes/IntegrityLogicTest.kt
   probes/src/test/kotlin/app/tracer/probes/SntpTest.kt
   probes/src/test/kotlin/app/tracer/probes/TowerCacheTest.kt
   app/src/test/kotlin/app/tracer/run/SampleRestampTest.kt
+  app/src/test/kotlin/app/tracer/run/StallDetectorTest.kt
   ui/src/test/kotlin/app/tracer/ui/components/chart/DecimateMinMaxTest.kt
 )
 echo "== compiling Android-free helpers from Android modules"

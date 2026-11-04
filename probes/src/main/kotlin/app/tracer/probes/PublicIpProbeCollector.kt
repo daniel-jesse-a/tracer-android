@@ -46,12 +46,14 @@ class PublicIpProbeCollector @Inject constructor(
                 ctx.signals.awaitResumed()
                 val targets = networks.networksFor(paths)
                 if (targets.isEmpty()) {
-                    val sample = noNetworkSample(ctx.runId, ctx.clock.now(), "public_ip", settings.publicIpUrl, paths)
-                    send(sample)
-                    ctx.status.sample(id, sample.stamp.tMonoNs)
+                    for (sample in noNetworkSamples(ctx.runId, ctx.clock.now(), "public_ip", settings.publicIpUrl, paths)) {
+                        send(sample)
+                        ctx.status.sample(id, sample.stamp.tMonoNs)
+                    }
                 }
                 for (bound in targets) {
                     val sample = runOnce(ctx, bound)
+                    if (!networks.keepRow(bound, sample.success)) continue
                     send(sample)
                     ctx.status.sample(id, sample.stamp.tMonoNs)
                 }

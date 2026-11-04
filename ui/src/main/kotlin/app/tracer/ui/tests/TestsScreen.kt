@@ -150,7 +150,7 @@ private fun ComparisonCard(c: Comparison) {
                 Spacer(Modifier.width(10.dp))
             }
             Text(
-                c.checksAfter?.let { "${it.roundToInt()}%" } ?: "—",
+                c.checksAfter?.let { "${it.roundToInt()}%" } ?: "–",
                 style = TType.largeTitle.copy(fontSize = 40.sp, lineHeight = 44.sp).merge(TType.num), color = fg,
             )
             Spacer(Modifier.width(12.dp))

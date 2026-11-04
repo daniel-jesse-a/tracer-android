@@ -109,7 +109,7 @@ enum class Limit(
         LOCATION_OFF -> listOf(
             FixStep("Turn on Location", "Use the quick switch, then come back.", done = { Checks.locationOn(it) },
                 act = FixAct.Open("Open Location") { listOf(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }),
-            FixStep("Keep Wi-Fi scanning on", "Location › Location services › Wi-Fi scanning on — improves indoor positions.",
+            FixStep("Keep Wi-Fi scanning on", "Location › Location services › Wi-Fi scanning on. Improves indoor positions.",
                 done = { Checks.wifiScanningAlways(it) },
                 act = FixAct.Open("Open Location services") { listOf(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }),
         )
@@ -127,7 +127,7 @@ enum class Limit(
                 act = FixAct.Request("Open location access", listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))),
         )
         PHONE_PERMISSION -> listOf(
-            FixStep("Allow phone access", "Tracer only reads signal and cell information — it never makes calls.",
+            FixStep("Allow phone access", "Tracer only reads signal and cell information. It never makes calls.",
                 done = { Permissions.phoneState(it) }, act = FixAct.Request("Allow phone access", listOf(Manifest.permission.READ_PHONE_STATE))),
         )
         NEARBY_WIFI -> listOf(

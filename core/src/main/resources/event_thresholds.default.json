@@ -33,5 +33,5 @@
     "churn_handovers": 3,
     "churn_window_s": 60.0,
     "churn_min_speed_mps": 15.0,
-    "cause_lookback_s": 15.0
+    "cause_lookback_s": 2.0
 }

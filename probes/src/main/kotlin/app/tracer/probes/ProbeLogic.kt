@@ -1,5 +1,6 @@
 package app.tracer.probes
 
+import app.tracer.core.config.ProbePaths
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -34,6 +35,12 @@ fun classifyError(t: Throwable): String {
     }
     return "io"
 }
+
+/**
+ * Whether a probe with no network writes a no_network row in this path mode. WIFI_ONLY writes
+ * nothing while Wi-Fi is off / not connected (the report shows "Wi-Fi not tested").
+ */
+fun ProbePaths.emitsNoNetworkRows(): Boolean = this != ProbePaths.WIFI_ONLY
 
 /** Max redirects followed (untimed) after a 3xx first hop, to learn probe.final_url / redirect_count. */
 const val MAX_REDIRECTS = 5
@@ -116,6 +123,14 @@ fun parseCloudflareTrace(body: String): IpInfo? {
     val ip = body.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("ip=") }?.substringAfter("ip=")?.takeIf { it.isNotBlank() }
     return ip?.let { IpInfo(it, null, null) }
 }
+
+/**
+ * Call timeout of a throughput test: DNS/TCP/TLS/TTFB (≤ 3 × probe timeout) + the transfer time box
+ * + 2 s, capped at [maxMs]. An unboxed test (throughputMaxMs = Long.MAX_VALUE, legacy runs) gets [maxMs].
+ */
+fun throughputCallTimeoutMs(probeTimeoutMs: Long, throughputMaxMs: Long, maxMs: Long): Long =
+    if (throughputMaxMs <= 0 || throughputMaxMs >= maxMs) maxMs
+    else minOf(maxMs, probeTimeoutMs * 3 + throughputMaxMs + 2_000L)
 
 /** Builds the throughput URL, substituting `{bytes}`. */
 fun throughputUrl(template: String, bytes: Long): String = template.replace("{bytes}", bytes.toString())

@@ -1,5 +1,7 @@
 package app.tracer.core.report
 
+import app.tracer.core.analysis.CoverageTracker
+import app.tracer.core.analysis.MovementTracker
 import app.tracer.core.model.*
 import app.tracer.core.util.Stats
 import kotlinx.serialization.json.*
@@ -95,7 +97,12 @@ data class Moment(
     val eventId: Long? = null,
     /** user feedback label ("yes" or "no:<corrected cause>") */
     val feedback: String? = null,
+    /** v3: the source event fell in the 30 s after a recording gap (wake artefact); not counted in the headline */
+    val afterResume: Boolean = false,
 )
+
+/** Latest integrity check per kind + target + path (DNS vs DoH, TLS certificate, first hop). */
+data class IntegrityResult(val kind: String, val path: String?, val target: String, val ok: Boolean?, val value: String?)
 
 /** Moment feedback ("Is this right? Yes / No, change") stored in x_event_label. */
 object Feedback {
@@ -143,7 +150,33 @@ data class TestReport(
     val deviceModel: String,
     val appVersion: String,
     val startedAt: Long,
+    // ---- v3 (ReportJson v2)
+    /** any Wi-Fi segment or Wi-Fi probe; false → the UI shows "Not tested" instead of a verdict */
+    val wifiTested: Boolean = true,
+    /** any mobile-data segment or cellular probe */
+    val mobileTested: Boolean = true,
+    /** observed track extent, east-west × north-south metres (fixes with h_acc > 50 m skipped); null = no usable fixes */
+    val bboxM: Pair<Double, Double>? = null,
+    /** observed path length, m (anchor-based, jitter-free) */
+    val pathM: Double? = null,
+    /** bbox diagonal < 150 m; null = no usable fixes */
+    val stationary: Boolean? = null,
+    /** "Stayed within 110 × 75 m" when the mode was walk/drive/rail but the phone did not really move */
+    val movementNote: String? = null,
+    /** recorded seconds: duration − pauses − gaps (x_gap rows + stalls > 15 s, merged) */
+    val capturedS: Double? = null,
+    /** captured ÷ (duration − paused) × 100 */
+    val coveragePct: Double? = null,
+    val gaps: Int = 0,
+    val longestGapS: Double = 0.0,
+    /** edge PoPs that served Wi-Fi / mobile probes, most used first: "DXB ×120" */
+    val edgesWifi: List<String> = emptyList(),
+    val edgesMobile: List<String> = emptyList(),
+    val integrity: List<IntegrityResult> = emptyList(),
 ) {
+    /** < 5 min: too short to compare against other tests */
+    val shortTest: Boolean get() = durationS < SHORT_TEST_S
+
     val onlineVerdict get() = Verdict.online(onlinePct)
     val wifiVerdict get() = Verdict.wifiRssi(wifiRssiMedian)
     val mobileVerdict get() = Verdict.rsrp(rsrpMedian)
@@ -167,7 +200,7 @@ data class TestReport(
 
     /** "Stayed online" / "Mostly online" / "Offline 2 times". */
     val headline: String get() {
-        val offlineMoments = moments.count { !it.stayedOnline }
+        val offlineMoments = moments.count { !it.stayedOnline && !it.afterResume }
         return when {
             onlinePct == null -> "No connection data"
             offlineMoments == 0 && onlinePct >= 99.5 -> "Stayed online"
@@ -178,13 +211,27 @@ data class TestReport(
 
     /** "Wi-Fi dipped. Mobile data covered 95 s." */
     val subline: String get() = buildList {
-        val wifiDipped = moments.any { it.kind == "drop" && it.before == Carrier.WIFI } ||
-            (wifiRssiWorst != null && wifiRssiWorst <= -80)
+        // only claims about networks that were actually tested
+        val wifiDipped = wifiTested && (moments.any { it.kind == "drop" && it.before == Carrier.WIFI && !it.afterResume } ||
+            (wifiRssiWorst != null && wifiRssiWorst <= -80))
         if (wifiDipped) add("Wi-Fi dipped.")
-        if (mobileCoveredS >= 1) add("Mobile data covered ${fmtDuration(mobileCoveredS)}.")
+        if (wifiTested && mobileCoveredS >= 1) add("Mobile data covered ${fmtDuration(mobileCoveredS)}.")
         if (offlineS >= 1) add("Offline for ${fmtDuration(offlineS)}.")
-        if (isEmpty()) add(if (segments.all { it.carrier == Carrier.WIFI }) "Wi-Fi held the whole test." else "No problems found.")
+        if (isEmpty()) add(when {
+            !wifiTested && !mobileTested -> "No network was tested."
+            !wifiTested -> "Mobile data only. Wi-Fi not tested."
+            segments.isNotEmpty() && segments.all { it.carrier == Carrier.WIFI } -> "Wi-Fi held the whole test."
+            else -> "No problems found."
+        })
+        val lost = (durationS - (capturedS ?: durationS)).coerceAtLeast(0.0)
+        if (gaps > 0 && coveragePct != null && coveragePct < 95.0) add("Recording had gaps: ${fmtDuration(lost)} not captured.")
     }.joinToString(" ")
+
+    companion object {
+        const val SHORT_TEST_S = 300.0
+        /** Comparison.pick ignores tests with less coverage than this. */
+        const val MIN_COMPARABLE_COVERAGE_PCT = 80.0
+    }
 }
 
 fun fmtDuration(s: Double): String {
@@ -228,6 +275,9 @@ object Plain {
             "throughput_drop" -> "Speed dropped"
             "signal_drop" -> "Mobile signal dropped"
             "rat_change" -> "Mobile network changed to ${ratPlain(a.str("rat"))}"
+            // a RAT change that reverted within 2 s, and the end of a GPS episode: kept in the event table, not moments
+            "rat_flicker" -> null
+            "gps_recovered" -> null
             "handover" -> null
             "neighbour_overtake" -> null
             "ip_asn_change" -> "Internet route changed"
@@ -278,6 +328,7 @@ object Plain {
         "congestion_backhaul" -> "Mobile network busy"
         "tunnel_underpass" -> "Signal blocked (tunnel or underpass)"
         "carrier_gateway_change" -> "Carrier route changed"
+        "dns_retry_timer" -> "Name lookup retried as the phone woke"
         "device_or_app" -> "Phone or app issue"
         "not_a_problem" -> "Not a problem"
         else -> key.replace('_', ' ').replaceFirstChar { it.uppercase() }
@@ -323,6 +374,11 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
     private val events = ArrayList<EventSample>()
     private val labels = HashMap<Long, String>()
     private var throughputMaxMs: Long? = null
+    private val coverage = CoverageTracker(run)
+    private val movementTrack = MovementTracker()
+    private var wifiProbe = false; private var mobileProbe = false
+    private val edges = HashMap<Carrier, HashMap<String, Int>>()
+    private val integrityLatest = LinkedHashMap<String, Pair<Long, IntegritySample>>()
 
     private val eventIds = ArrayList<Long?>()
 
@@ -332,6 +388,7 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
 
     fun add(s: Sample) {
         val t = s.stamp.tMonoNs
+        coverage.add(s)
         when (s) {
             is NetworkPathSample -> { see(t); paths += Triple(t, Carrier.of(s.primaryInterface, s.status), s.status == "satisfied") }
             is WifiConnectionSample -> {
@@ -350,6 +407,9 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
             is ProbeSample -> {
                 see(t)
                 val c = if (s.isCellular == true || s.iface == "cellular") Carrier.MOBILE else Carrier.WIFI
+                if (c == Carrier.MOBILE) mobileProbe = true
+                else if (s.isCellular == false || s.iface == "wifi" || s.iface == "ethernet") wifiProbe = true
+                s.edgePop?.let { pop -> edges.getOrPut(c) { HashMap() }.merge(pop, 1, Int::plus) }
                 when (s.probeType) {
                     "latency" -> {
                         checks++; if (s.success && s.expectedResponse != false) passed++
@@ -365,6 +425,12 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
                 s.hAccM?.let { hAcc += it }
                 providers[s.provider] = (providers[s.provider] ?: 0) + 1
                 if (s.provider == "gps") gpsFixes++
+                movementTrack.add(s)
+            }
+            is IntegritySample -> {
+                val key = "${s.kind}|${s.target}|${s.path ?: ""}"
+                val prev = integrityLatest[key]
+                if (prev == null || t >= prev.first) integrityLatest[key] = t to s
             }
             is GnssSatelliteSample -> { see(t)
                 if (t != gnssT) { gnssT = t; gnssUsed = 0 }
@@ -438,14 +504,16 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
                     stayed = after != Carrier.NONE
                 }
                 "reconnect" -> { lasted = obj(e.afterJson).num("outage_ms")?.div(1000.0) }
+                "gps_degraded" -> lasted = evs.drop(i + 1).firstOrNull { it.eventType == "gps_recovered" }?.let { s(it.stamp.tMonoNs) - tS }
             }
             // a reconnect right after a path switch back is the same moment
             if (e.eventType == "reconnect" && moments.lastOrNull()?.let { it.title == title && tS - it.tS < 5 } == true) continue
             if (e.eventType == "wifi_cell_switch" && moments.lastOrNull()?.let { it.kind == "drop" && tS - it.tS < 5 } == true &&
                 title == "Switched to mobile data") continue
             val cause = Plain.cause(e)
+            val afterResume = (obj(e.evidenceJson)["after_resume"] as? JsonPrimitive)?.booleanOrNull == true
             moments += Moment(tS, e.eventType, title, e.severity, e.stamp.tMonoNs, lasted, stayed, before, after,
-                e.likelyCause, cause?.first, cause?.second, eventId = ids[i], feedback = ids[i]?.let { labels[it] })
+                e.likelyCause, cause?.first, cause?.second, eventId = ids[i], feedback = ids[i]?.let { labels[it] }, afterResume = afterResume)
         }
         // roams the engine did not report as events (BSSID change)
         for (t in bssidChanges) if (roamTimes.none { kotlin.math.abs(it - t) < 3_000_000_000L }) {
@@ -473,6 +541,12 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
             .filter { it.value >= 1 }.toList().sortedByDescending { it.second }.toMap() else emptyMap()
         val tech = rats.maxByOrNull { it.value }?.key?.let { Plain.ratPlain(it) }
         val topProvider = providers.maxByOrNull { it.value }?.key
+        val cov = coverage.build()
+        val mv = movementTrack.build()
+        val moved = run.mode in setOf("walk", "drive", "rail")
+        val movementNote = if (moved && mv.stationary == true) mv.bboxM?.let { (w, h) -> "Stayed within ${round5(w)} × ${round5(h)} m" } else null
+        fun edgeList(c: Carrier) = edges[c].orEmpty().entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .map { "${it.key} ×${it.value}" }
         val posSource = when (topProvider) { "gps" -> "GPS"; "fused" -> if (gpsFixes == 0) "Wi-Fi" else "GPS + Wi-Fi"; "network" -> "Wi-Fi"; null -> null; else -> topProvider }
 
         return TestReport(
@@ -500,8 +574,19 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
             speedTestSeconds = throughputMaxMs?.let { (it / 1000).toInt() },
             methodFingerprint = run.methodFingerprint,
             deviceModel = run.deviceModel, appVersion = run.appVersion, startedAt = run.startedAt,
+            wifiTested = segs.any { it.carrier == Carrier.WIFI } || wifiProbe,
+            mobileTested = segs.any { it.carrier == Carrier.MOBILE } || mobileProbe,
+            bboxM = mv.bboxM?.let { r1(it.first) to r1(it.second) }, pathM = if (mv.fixesUsed > 0) r1(mv.pathM) else null,
+            stationary = mv.stationary, movementNote = movementNote,
+            capturedS = r1(cov.capturedMs / 1000.0), coveragePct = cov.coveragePct, gaps = cov.gapCount,
+            longestGapS = r1(cov.longestGapMs / 1000.0),
+            edgesWifi = edgeList(Carrier.WIFI), edgesMobile = edgeList(Carrier.MOBILE),
+            integrity = integrityLatest.values.sortedWith(compareBy({ it.second.kind }, { it.second.target }, { it.second.path ?: "" }))
+                .map { (_, i) -> IntegrityResult(i.kind, i.path, i.target, i.ok, i.value) },
         )
     }
+
+    private fun round5(m: Double): Int = (Math.round(m / 5.0) * 5).toInt().coerceAtLeast(5)
 
     private fun r1(x: Double) = Math.round(x * 10) / 10.0
 
@@ -539,7 +624,11 @@ data class Comparison(
     companion object {
         /** Newest test vs the oldest earlier test at the same site, if any. */
         fun pick(reports: List<Pair<RunRecord, TestReport>>): Comparison? {
-            val withSite = reports.filter { it.first.site != null && it.second.checksPassedPct != null }
+            // short tests (< 5 min) and tests with < 80 % coverage are not comparable
+            val withSite = reports.filter { (r, t) ->
+                r.site != null && t.checksPassedPct != null && !t.shortTest &&
+                    (t.coveragePct == null || t.coveragePct >= TestReport.MIN_COMPARABLE_COVERAGE_PCT)
+            }
             val latest = withSite.maxByOrNull { it.first.startedAt } ?: return null
             val older = withSite.filter { it.first.site.equals(latest.first.site, true) && it.first.runId != latest.first.runId }
                 .minByOrNull { it.first.startedAt } ?: return null

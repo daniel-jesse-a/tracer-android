@@ -35,7 +35,8 @@ data class Manifest(
 
 object Bundle {
     /** v2: lean (non-empty tables only), t_run_s/t_local CSV columns, summary.json, time zone + method fingerprint in run.json */
-    const val BUNDLE_VERSION = 2
+    /** v3: schema v3 (integrity table, probe edge columns, location.is_mock); run.json/summary.json carry `coverage` (x_gap + stalls), `method.cause_window_s` */
+    const val BUNDLE_VERSION = 3
     const val MANIFEST = "run.json"
     const val SUMMARY = "summary.json"
 
@@ -124,7 +125,27 @@ object Bundle {
 
         val files = staged.map { (f, rows) -> BundleFile(f.name, f.length(), sha256Hex(f), rows) }
         val fingerprint = sha256Hex(Schema.sharedFingerprint().toByteArray())
-        val manifestJson = JsonObject(manifestJson(run, files, generator, nowUtcMs, fingerprint) + buildJsonObject {
+        val coverage = summaryJson["coverage"] as? JsonObject
+        val base = manifestJson(run, files, generator, nowUtcMs, fingerprint)
+        // recorded completeness, plus the gap figures derived from the data (x_gap rows + stalls)
+        val completeness = (base["completeness"] as? JsonObject)?.let { c ->
+            JsonObject(c + buildJsonObject {
+                put("gaps", summaryJson["gaps"] ?: JsonNull)
+                put("gap_s", (coverage?.get("gaps") as? JsonObject)?.get("total_s") ?: JsonNull)
+                put("captured_s", summaryJson["captured_s"] ?: JsonNull)
+                put("coverage_pct", summaryJson["coverage_pct"] ?: JsonNull)
+            })
+        } ?: base["completeness"] ?: JsonNull
+        val manifestJson = JsonObject(base + buildJsonObject {
+            put("completeness", completeness)
+            put("captured_s", summaryJson["captured_s"] ?: JsonNull)
+            put("coverage_pct", summaryJson["coverage_pct"] ?: JsonNull)
+            put("coverage", coverage ?: JsonNull)
+            putJsonObject("method") {
+                put("fingerprint", summaryJson["method_fingerprint"] ?: JsonNull)
+                put("cause_window_s", (settings?.thresholds ?: app.tracer.core.config.Thresholds()).causeWindowMs / 1000.0)
+                put("stall_threshold_s", app.tracer.core.analysis.CoverageTracker.STALL_MS / 1000.0)
+            }
             put("time_zone", zone.id)
             put("method_fingerprint", summaryJson["method_fingerprint"] ?: JsonNull)
             putJsonArray("tables_omitted") { omitted.forEach { add(it) } }

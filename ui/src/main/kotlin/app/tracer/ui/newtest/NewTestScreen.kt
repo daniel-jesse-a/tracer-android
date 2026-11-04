@@ -229,12 +229,13 @@ fun NewTestScreen(
                 if (phones > 1) "Start on $phones phones" else "Start test",
                 onClick = { vm.start(); onStarted() },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !r.hardBlocked,
+                enabled = !r.hardBlocked && setup.siteOrNull != null,
             )
             Spacer(Modifier.height(10.dp))
             val data = vm.mobileDataLabel(st, setup)
             val caption = when {
                 r.hardBlocked -> "Fix the red items to start"
+                setup.siteOrNull == null -> "Add a site name to start"
                 phones > 1 -> "This phone + $companions ${if (companions == 1) "companion" else "companions"} · " + (data?.let { "$it each" } ?: "no mobile data")
                 else -> data ?: "Wi-Fi only · no mobile data used"
             }

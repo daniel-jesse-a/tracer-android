@@ -65,6 +65,18 @@ object TrackBuilder {
             .sortedBy { it.stamp.tMonoNs }
     }
 
+    /** PositionFilter over a run's fixes; drops points closer than 2 m to the previous kept one. */
+    fun smooth(sorted: List<LocationSample>): List<LocationSample> {
+        val f = app.tracer.core.geo.PositionFilter()
+        val out = ArrayList<LocationSample>(sorted.size)
+        for (l in sorted) {
+            val p = f.add(l) ?: continue
+            val last = out.lastOrNull()
+            if (last == null || app.tracer.core.util.Geo.haversineM(last.lat, last.lon, p.lat, p.lon) >= 2.0) out += p
+        }
+        return out
+    }
+
     /** Walks every stream once (merge-style) and attaches the latest non-stale value to each fix. */
     fun build(
         locations: List<LocationSample>,
@@ -75,7 +87,8 @@ object TrackBuilder {
         gnss: GnssEpochs? = null,
         paths: List<NetworkPathSample> = emptyList(),
     ): List<MapPoint> {
-        val locs = locations.sortedBy { it.stamp.tMonoNs }
+        // same smoothing as the live map: one stable position, no indoor wander
+        val locs = smooth(locations.sortedBy { it.stamp.tMonoNs })
         val cells = primaryServing(serving)
         val lat = probes.filter { it.probeType == "latency" }.sortedBy { it.stamp.tMonoNs }
         val wf = wifi.sortedBy { it.stamp.tMonoNs }

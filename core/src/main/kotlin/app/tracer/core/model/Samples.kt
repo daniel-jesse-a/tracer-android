@@ -35,6 +35,8 @@ enum class Table(val sqlName: String) {
     // v2 shared tables
     WAYPOINT("waypoint"),
     WIFI_ROAM("wifi_roam"),
+    // v3 shared table
+    INTEGRITY("integrity"),
 
     // Android-only extension tables (prefixed x_). The iOS importer ignores unknown tables;
     // the shared tables above are byte-for-byte identical in column set and order.
@@ -80,6 +82,8 @@ data class LocationSample(
     val gpsTimeMs: Long? = null,
     /** "gps" | "fused" | "network" | "core_location" (iOS) */
     val provider: String,
+    /** v3: Location.isMock (Android) / sourceInformation.isSimulatedBySoftware (iOS) — spoofing check */
+    val isMock: Boolean? = null,
 ) : Sample { override val table get() = Table.LOCATION }
 
 data class MotionSample(
@@ -229,6 +233,17 @@ data class ProbeSample(
     val redirectCount: Int? = null,
     val finalUrl: String? = null,
     val expectedResponse: Boolean? = null,
+    // v3: which server answered
+    /** remote address of the connection that served the request */
+    val remoteIp: String? = null,
+    /** 4 | 6 */
+    val ipVersion: Int? = null,
+    /** edge / PoP identifier: Cloudflare cf-ray suffix (e.g. "DXB"), x-amz-cf-pop, x-served-by, Apple x-apple-edge / via node */
+    val edgePop: String? = null,
+    /** JSON object of the raw edge headers that were present: cf-ray, server, via, x-cache, x-served-by, x-amz-cf-pop, alt-svc … */
+    val edgeHeaders: String? = null,
+    /** SHA-256 of the leaf TLS certificate (hex) */
+    val tlsCertSha256: String? = null,
 ) : Sample {
     override val table get() = Table.PROBE
     val reachable: Boolean get() = success
@@ -341,6 +356,27 @@ data class GapSample(
     /** pause | process_restart | storage_low | permission_revoked | airplane_mode | watchdog */
     val reason: String,
 ) : Sample { override val table get() = Table.X_GAP }
+
+/**
+ * v3 integrity check (shared table "integrity"):
+ *  kind = dns_doh   — system resolver answers vs DNS-over-HTTPS answers for the same host
+ *         tls_cert  — leaf certificate fingerprint seen for a host (compare across runs/paths)
+ *         first_hop — first public hop on the path (TTL-limited ping / traceroute)
+ */
+data class IntegritySample(
+    override val runId: String,
+    override val stamp: Stamp,
+    val kind: String,
+    /** wifi | cellular */
+    val path: String? = null,
+    val target: String,
+    /** true = consistent / found; false = mismatch / failed; null = could not test */
+    val ok: Boolean? = null,
+    /** short result: answer list, fingerprint, hop IP */
+    val value: String? = null,
+    /** JSON detail (system/doh answers, issuer, ttl, rtt …) */
+    val detailJson: String? = null,
+) : Sample { override val table get() = Table.INTEGRITY }
 
 // ---------- v2 shared tables ----------
 

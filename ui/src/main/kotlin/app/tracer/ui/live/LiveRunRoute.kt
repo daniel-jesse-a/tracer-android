@@ -146,7 +146,7 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSignals: () -> Unit,
                     selectedEventId = selected?.event?.stamp?.tMonoNs,
                     showLegend = false,
                 )
-                val acc = snap.location?.hAccM
+                val acc = (snap.rawLocation ?: snap.location)?.hAccM
                 Box(
                     Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(50))
                         .background(Color(0xCC1C1C1E)).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -193,12 +193,19 @@ fun LiveRunRoute(onRunEnded: (runId: String) -> Unit, onOpenSignals: () -> Unit,
     if (showMark) MarkMomentDialog(onDismiss = { showMark = false }, onConfirm = { note -> vm.markMoment(note); showMark = false })
     pendingWaypoint?.let { p -> WaypointSheet(p, onCommit = vm::commitWaypoint) }
     if (showEnd) {
+        val shortRun = snap.elapsedMs < 5 * 60_000L
         AlertDialog(
             onDismissRequest = { showEnd = false },
             containerColor = tc.card,
-            title = { Text("Finish this test?", color = tc.text) },
-            text = { Text("Recording stops and the summary opens.", color = tc.text2) },
-            confirmButton = { TextButton(onClick = { showEnd = false; vm.stop() }) { Text("Finish", color = tc.link, fontWeight = FontWeight.SemiBold) } },
+            title = { Text(if (shortRun) "Finish early?" else "Finish this test?", color = tc.text) },
+            text = {
+                Text(
+                    if (shortRun) "Tests under 5 minutes are marked short and left out of comparisons. Recording stops and the summary opens."
+                    else "Recording stops and the summary opens.",
+                    color = tc.text2,
+                )
+            },
+            confirmButton = { TextButton(onClick = { showEnd = false; vm.stop() }) { Text(if (shortRun) "Finish anyway" else "Finish", color = tc.link, fontWeight = FontWeight.SemiBold) } },
             dismissButton = { TextButton(onClick = { showEnd = false }) { Text("Keep going", color = tc.link) } },
         )
     }
@@ -256,7 +263,7 @@ private fun Tiles(snap: LiveSnapshot, carrier: Carrier, onOpenSignals: () -> Uni
     val mobileV = Verdict.rsrp(rsrp?.toDouble())
     val tech = (snap.rat ?: serving?.rat)?.let { Plain.ratPlain(it) }
     val rtt = snap.latencyMs
-    val acc = snap.location?.hAccM
+    val acc = (snap.rawLocation ?: snap.location)?.hAccM
     TileRow {
         VerdictTile(
             "Wi-Fi", if (rssi != null) Fmt.int(rssi) else "Off", wifiV, Modifier.weight(1f),
@@ -267,7 +274,7 @@ private fun Tiles(snap: LiveSnapshot, carrier: Carrier, onOpenSignals: () -> Uni
             "Mobile data",
             when {
                 tech == null && serving == null -> "No signal"
-                else -> "${tech ?: "—"} · ${if (carrier == Carrier.MOBILE) "in use" else "ready"}"
+                else -> "${tech ?: "–"} · ${if (carrier == Carrier.MOBILE) "in use" else "ready"}"
             },
             mobileV, Modifier.weight(1f), onClick = onOpenSignals,
         )

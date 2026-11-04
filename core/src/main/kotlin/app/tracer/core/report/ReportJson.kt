@@ -4,7 +4,8 @@ import kotlinx.serialization.json.*
 
 /** Hand-written JSON codec for [TestReport] (cache file + "summary" share item). Bump [VERSION] on shape changes. */
 object ReportJson {
-    const val VERSION = 1
+    /** v2: tested flags, movement (bbox/path/stationary), coverage, edge PoPs, integrity, moment after_resume */
+    const val VERSION = 2
 
     fun encode(r: TestReport): JsonObject = buildJsonObject {
         put("v", VERSION)
@@ -28,13 +29,22 @@ object ReportJson {
             put("t_s", m.tS); put("kind", m.kind); put("title", m.title); put("severity", m.severity); put("mono_ns", m.eventMonoNs)
             put("lasted_s", m.lastedS); put("stayed_online", m.stayedOnline); put("before", m.before?.name); put("after", m.after?.name)
             put("cause_key", m.causeKey); put("cause_title", m.causeTitle); put("cause_detail", m.causeDetail)
-            put("event_id", m.eventId); put("feedback", m.feedback)
+            put("event_id", m.eventId); put("feedback", m.feedback); put("after_resume", m.afterResume)
         }) } })
         put("wifi_rssi", pts(r.wifiRssi)); put("new_ap_at_s", buildJsonArray { r.newApAtS.forEach { add(it) } })
         put("response_wifi", pts(r.responseWifi)); put("response_mobile", pts(r.responseMobile))
         put("speed_tests", buildJsonArray { r.speedTests.forEach { add(buildJsonArray { add(it.tS); add(it.carrier.name); add(it.mbps) }) } })
         put("speed_test_seconds", r.speedTestSeconds); put("method_fingerprint", r.methodFingerprint)
         put("device_model", r.deviceModel); put("app_version", r.appVersion); put("started_at", r.startedAt)
+        put("wifi_tested", r.wifiTested); put("mobile_tested", r.mobileTested)
+        put("bbox_m", r.bboxM?.let { b -> buildJsonArray { add(b.first); add(b.second) } } ?: JsonNull)
+        put("path_m", r.pathM); put("stationary", r.stationary); put("movement_note", r.movementNote)
+        put("captured_s", r.capturedS); put("coverage_pct", r.coveragePct); put("gaps", r.gaps); put("longest_gap_s", r.longestGapS)
+        put("edges_wifi", buildJsonArray { r.edgesWifi.forEach { add(it) } }); put("edges_mobile", buildJsonArray { r.edgesMobile.forEach { add(it) } })
+        put("integrity", buildJsonArray { r.integrity.forEach { i -> add(buildJsonObject {
+            put("kind", i.kind); put("path", i.path); put("target", i.target); put("ok", i.ok); put("value", i.value)
+        }) } })
+        put("short_test", r.shortTest)
         // derived, for readers of the shared summary
         put("verdicts", buildJsonObject {
             put("overall", r.overallVerdict.label); put("online", r.onlineVerdict.label); put("wifi_signal", r.wifiVerdict.label)
@@ -68,7 +78,7 @@ object ReportJson {
             moments = (o["moments"] as? JsonArray)?.map { val m = it.jsonObject
                 Moment(m.d("t_s") ?: 0.0, m.s("kind") ?: "", m.s("title") ?: "", m.s("severity") ?: "info", m.l("mono_ns") ?: 0,
                     m.d("lasted_s"), m.b("stayed_online") ?: true, m.s("before")?.let { Carrier.valueOf(it) }, m.s("after")?.let { Carrier.valueOf(it) },
-                    m.s("cause_key"), m.s("cause_title"), m.s("cause_detail"), m.l("event_id"), m.s("feedback"))
+                    m.s("cause_key"), m.s("cause_title"), m.s("cause_detail"), m.l("event_id"), m.s("feedback"), m.b("after_resume") ?: false)
             } ?: emptyList(),
             wifiRssi = pts(o["wifi_rssi"]), newApAtS = (o["new_ap_at_s"] as? JsonArray)?.map { it.jsonPrimitive.double } ?: emptyList(),
             responseWifi = pts(o["response_wifi"]), responseMobile = pts(o["response_mobile"]),
@@ -76,6 +86,14 @@ object ReportJson {
                 SpeedTest(a[0].jsonPrimitive.double, Carrier.valueOf(a[1].jsonPrimitive.content), a[2].jsonPrimitive.double) } ?: emptyList(),
             speedTestSeconds = o.int("speed_test_seconds"), methodFingerprint = o.s("method_fingerprint"),
             deviceModel = o.s("device_model") ?: "", appVersion = o.s("app_version") ?: "", startedAt = o.l("started_at") ?: 0,
+            wifiTested = o.b("wifi_tested") ?: true, mobileTested = o.b("mobile_tested") ?: true,
+            bboxM = (o["bbox_m"] as? JsonArray)?.let { a -> a[0].jsonPrimitive.double to a[1].jsonPrimitive.double },
+            pathM = o.d("path_m"), stationary = o.b("stationary"), movementNote = o.s("movement_note"),
+            capturedS = o.d("captured_s"), coveragePct = o.d("coverage_pct"), gaps = o.int("gaps") ?: 0, longestGapS = o.d("longest_gap_s") ?: 0.0,
+            edgesWifi = (o["edges_wifi"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList(),
+            edgesMobile = (o["edges_mobile"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList(),
+            integrity = (o["integrity"] as? JsonArray)?.map { val i = it.jsonObject
+                IntegrityResult(i.s("kind") ?: "", i.s("path"), i.s("target") ?: "", i.b("ok"), i.s("value")) } ?: emptyList(),
         )
     }
 

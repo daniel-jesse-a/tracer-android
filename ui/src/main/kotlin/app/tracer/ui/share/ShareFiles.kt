@@ -133,7 +133,7 @@ class ShareFiles @Inject constructor(
         "Tracer · ${r.title} · ${r.overallVerdict.label} · ${DATE.format(Date(run.startedAt))}"
 
     private fun body(run: RunRecord, r: TestReport, files: List<File>, note: String?): String = buildString {
-        appendLine("${r.title} — ${r.headline}")
+        appendLine("${r.title}: ${r.headline}")
         appendLine(r.subline)
         appendLine()
         appendLine("Length ${fmtClock(r.durationS)} · ${run.deviceModel} · Tracer ${run.appVersion}")
@@ -150,7 +150,7 @@ class ShareFiles @Inject constructor(
             appendLine("Moments")
             r.moments.take(20).forEach { m ->
                 append("  ${fmtClock(m.tS)}  ${m.title}")
-                m.causeTitle?.let { append(" — $it") }
+                m.causeTitle?.let { append(": $it") }
                 appendLine()
             }
             if (r.moments.size > 20) appendLine("  … ${r.moments.size - 20} more in the report")

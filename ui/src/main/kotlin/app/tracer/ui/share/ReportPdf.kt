@@ -168,9 +168,9 @@ object ReportPdf {
             val ms = r.mobileSpeedMedian ?: r.mobileSpeedMax
             val rt = r.responseMs
             val list = listOf(
-                T("Wi-Fi speed", ws?.let { "${it.roundToInt()}" } ?: "—", ws?.let { "Mbps" }, r.wifiSpeedVerdict),
-                T("Mobile speed", ms?.let { "${it.roundToInt()}" } ?: "—", ms?.let { "Mbps" }, r.mobileSpeedVerdict),
-                T("Response", rt?.let { "≤${it.roundToInt()}" } ?: "—", rt?.let { "ms" }, r.responseVerdict),
+                T("Wi-Fi speed", ws?.let { "${it.roundToInt()}" } ?: "–", ws?.let { "Mbps" }, r.wifiSpeedVerdict),
+                T("Mobile speed", ms?.let { "${it.roundToInt()}" } ?: "–", ms?.let { "Mbps" }, r.mobileSpeedVerdict),
+                T("Response", rt?.let { "≤${it.roundToInt()}" } ?: "–", rt?.let { "ms" }, r.responseVerdict),
                 T("Stability", "${r.switches}", if (r.switches == 1) "switch" else "switches", r.stabilityVerdict),
             )
             val gap = 8f
@@ -288,8 +288,8 @@ object ReportPdf {
                 if (y + 17 > H - M - 16) { newPage(); headerRow() }
                 cv.drawText(fmtClock(m.tS), cols[0], y + 11, greyP)
                 cv.drawText(ellipsize(m.title, rowP, cols[2] - cols[1] - 8), cols[1], y + 11, rowP)
-                cv.drawText(m.lastedS?.takeIf { it >= 1 }?.let { fmtDuration(it) } ?: "—", cols[2], y + 11, greyP)
-                val cause = m.causeTitle ?: "—"
+                cv.drawText(m.lastedS?.takeIf { it >= 1 }?.let { fmtDuration(it) } ?: "–", cols[2], y + 11, greyP)
+                val cause = m.causeTitle ?: "–"
                 cv.drawText(ellipsize(cause, greyP, M + CW - cols[3]), cols[3], y + 11, greyP)
                 y += 16
                 cv.drawLine(M, y, M + CW, y, Paint().apply { color = SEP; strokeWidth = 0.5f })
@@ -306,7 +306,7 @@ object ReportPdf {
             cv.drawRoundRect(RectF(W - M - capW, y - 22, W - M, y - 6), 8f, 8f, fill(bg(v)))
             cv.drawText(v.label, W - M - capW / 2, y - 10.5f, text(10f, fg(v), true, Paint.Align.CENTER))
             val checks = r.checksPassedPct
-            bar("Checks passed", checks?.let { "${it.roundToInt()}%" } ?: "—", ((checks ?: 0.0) / 100).toFloat(), fg(Verdict.checks(checks)))
+            bar("Checks passed", checks?.let { "${it.roundToInt()}%" } ?: "–", ((checks ?: 0.0) / 100).toFloat(), fg(Verdict.checks(checks)))
             val pf = positionsFraction(r)
             bar("Positions", "${r.positions}", pf.toFloat(), fg(Verdict.checks(pf * 100)))
             r.onSchedulePct?.let { bar("On schedule", "${it.roundToInt()}%", (it / 100).toFloat(), fg(Verdict.checks(it))) }
@@ -324,14 +324,14 @@ object ReportPdf {
         }
 
         private fun details() {
-            fun d(v: Double?, unit: String) = v?.let { "${it.roundToInt().toString().replace('-', '−')} $unit" } ?: "—"
+            fun d(v: Double?, unit: String) = v?.let { "${it.roundToInt().toString().replace('-', '−')} $unit" } ?: "–"
             val rows = listOf(
-                "Online" to (r.onlinePct?.let { "${it.roundToInt()}% · ${r.onlineVerdict.label}" } ?: "—"),
+                "Online" to (r.onlinePct?.let { "${it.roundToInt()}% · ${r.onlineVerdict.label}" } ?: "–"),
                 "Wi-Fi signal (median)" to "${d(r.wifiRssiMedian, "dBm")} · ${r.wifiVerdict.label}",
                 "Mobile signal (median)" to "${d(r.rsrpMedian, "dBm")} · ${r.mobileVerdict.label}",
-                "Mobile network" to listOfNotNull(r.mobileTech, r.mobileBand?.let { "band $it" }).joinToString(" · ").ifEmpty { "—" },
+                "Mobile network" to listOfNotNull(r.mobileTech, r.mobileBand?.let { "band $it" }).joinToString(" · ").ifEmpty { "–" },
                 "Response Wi-Fi / mobile" to "${d(r.responseWifiMs, "ms")} / ${d(r.responseMobileMs, "ms")}",
-                "Position" to (r.positionAccM?.let { "±${it.roundToInt()} m" + (r.positionSource?.let { s -> " · $s" } ?: "") } ?: "—"),
+                "Position" to (r.positionAccM?.let { "±${it.roundToInt()} m" + (r.positionSource?.let { s -> " · $s" } ?: "") } ?: "–"),
                 "Checks" to "${r.checks} · false drops ${r.falseDrops}",
                 "App" to "Tracer ${r.appVersion}",
             )

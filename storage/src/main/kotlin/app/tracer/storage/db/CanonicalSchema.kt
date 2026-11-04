@@ -21,9 +21,12 @@ object CanonicalMigrations {
     /**
      * v1 → v2: [Schema.migrationSql] minus the `runs` statements (Room owns `runs`; its columns are
      * added by [TracerDatabase.MIGRATION_1_2]).
+     * v2 → v3: location.is_mock, probe.remote_ip/ip_version/edge_pop/edge_headers/tls_cert_sha256,
+     * and the `integrity` table (CREATE IF NOT EXISTS, already created by onOpen's DDL pass).
      */
     val registry: Map<Int, List<String>> = mapOf(
         1 to Schema.migrationSql(1).filterNot { SqlGuards.alterTarget(it)?.first == Schema.RUNS.name },
+        2 to Schema.migrationSql(2).filterNot { SqlGuards.alterTarget(it)?.first == Schema.RUNS.name },
     )
 
     const val CREATE_META_SQL = "CREATE TABLE IF NOT EXISTS $META_TABLE (key TEXT PRIMARY KEY, value TEXT)"

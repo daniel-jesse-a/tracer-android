@@ -13,7 +13,7 @@ class SchemaTest {
     @Test fun sharedSchemaMatchesSpec() {
         val expect = mapOf(
             "runs" to "run_id,t_utc_ms,t_mono_ns,name,mode,device_platform,device_model,os_version,app_version,started_at,ended_at,linked_run_id,settings_json,gps_offset_ms_start,gps_offset_ms_end,ntp_offset_ms,completeness_json,site,test_number,protocol,time_zone,method_fingerprint",
-            "location" to "lat,lon,alt_m,h_acc_m,v_acc_m,speed_mps,speed_acc,course_deg,course_acc,floor,gps_time_ms,provider",
+            "location" to "lat,lon,alt_m,h_acc_m,v_acc_m,speed_mps,speed_acc,course_deg,course_acc,floor,gps_time_ms,provider,is_mock",
             "motion" to "activity,confidence,pressure_kpa,rel_alt_m,accel_mean,accel_max",
             "network_path" to "status,interfaces,primary_interface,is_expensive,is_constrained,ipv4,ipv6,link_quality,unsatisfied_reason",
             "radio" to "service_id,rat,nr_state,carrier_aggregation",
@@ -22,13 +22,14 @@ class SchemaTest {
             "cell_neighbour" to "rat,mcc,mnc,tac,cell_id,pci,earfcn_or_arfcn,band,bandwidth_mhz,rsrp,rsrq,rssi,sinr,cqi,timing_advance,cellinfo_age_ms,subscription_id",
             "wifi_scan" to "scan_id,ssid,bssid,rssi_dbm,frequency_mhz,channel_width,standard,capabilities,features",
             "gnss_satellite" to "svid,constellation,cn0_dbhz,elevation,azimuth,used_in_fix,carrier_freq_hz",
-            "probe" to "probe_type,endpoint,success,error,dns_ms,connect_ms,tls_ms,ttfb_ms,total_ms,bytes,mbps,interface,is_cellular,public_ip,asn,asn_org,http_status,redirect_count,final_url,expected_response",
+            "probe" to "probe_type,endpoint,success,error,dns_ms,connect_ms,tls_ms,ttfb_ms,total_ms,bytes,mbps,interface,is_cellular,public_ip,asn,asn_org,http_status,redirect_count,final_url,expected_response,remote_ip,ip_version,edge_pop,edge_headers,tls_cert_sha256",
             "device" to "battery,charging,low_power,thermal_state",
             "event" to "event_type,severity,before_json,after_json,lat,lon,likely_cause,cause_confidence,evidence_json",
             "annotation" to "text,audio_path",
             "metrickit_payload" to "payload_json",
             "waypoint" to "seq,label,lat,lon,h_acc_m,provider",
             "wifi_roam" to "ssid,from_bssid,to_bssid,from_band,to_band,from_rssi_dbm,to_rssi_dbm,link_down_ms,latency_penalty_ms,rtt_before_ms,rtt_after_ms,target_11k,target_11v,target_11r",
+            "integrity" to "gps_time_ms,kind,path,target,ok,value,detail_json",
         )
         assertEquals(expect.keys, Schema.shared.map { it.name }.toSet())
         for (td in Schema.shared) {
@@ -39,6 +40,24 @@ class SchemaTest {
                 assertEquals(td.name, expect[td.name], cols.drop(3).joinToString(","))
             }
         }
+    }
+
+    @Test fun v3MigrationAddsColumnsAndIntegrity() {
+        val sql = Schema.migrationSql(2)
+        val alters = sql.filter { it.startsWith("ALTER") }
+        assertEquals(6, alters.size)
+        assertTrue(alters.contains("ALTER TABLE location ADD COLUMN is_mock INTEGER"))
+        assertTrue(sql.any { it.startsWith("CREATE TABLE IF NOT EXISTS integrity (") })
+        assertTrue(sql.any { it.startsWith("CREATE INDEX IF NOT EXISTS idx_integrity_run_time") })
+        // every added column exists in the v3 definition, with the same type
+        for (a in alters) {
+            val (table, col, type) = Regex("ALTER TABLE (\\w+) ADD COLUMN (\\w+) (\\w+)").find(a)!!.destructured
+            val c = Schema.all.first { it.name == table }.columns.first { it.name == col }
+            assertEquals(a, type, c.type.sql)
+            assertFalse("added columns must be nullable", c.notNull)
+        }
+        assertEquals(3, Schema.VERSION)
+        assertTrue(Table.INTEGRITY.isShared)
     }
 
     @Test fun ddlIsWellFormed() {
@@ -95,6 +114,11 @@ class SchemaTest {
             CarrierSample("r", st, "2", 0, "LTE", "B3", 1651, 225, 20.0, true, "bandwidth+cellinfo"),
             CollectorLogSample("r", st, "wifi_rtt", "disabled", "off in settings", 0),
             ProbeSample("r", st, "latency", "https://e", true, null, httpStatus = 301, redirectCount = 1, finalUrl = "https://e/en", expectedResponse = true),
+            ProbeSample("r", st, "latency", "https://e", true, remoteIp = "2606:4700::6810:1", ipVersion = 6, edgePop = "DXB",
+                edgeHeaders = "{\"cf-ray\":\"8a1-DXB\"}", tlsCertSha256 = "0f".repeat(32)),
+            IntegritySample("r", st.copy(gpsTimeMs = 11), "dns_doh", "wifi", "www.google.com", true, "142.250.1.1", "{\"doh\":[\"142.250.1.1\"]}"),
+            IntegritySample("r", st, "first_hop", null, "8.8.8.8", null, null, null),
+            LocationSample("r", st.copy(gpsTimeMs = 9), 1.0, 2.0, gpsTimeMs = 9, provider = "gps", isMock = true),
         )
     }
 }

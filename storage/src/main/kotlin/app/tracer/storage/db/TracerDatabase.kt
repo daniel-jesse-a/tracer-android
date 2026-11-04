@@ -13,7 +13,7 @@ import app.tracer.core.schema.Schema
  * table is created from the canonical DDL by [CanonicalSchema.Callback] and accessed with raw SQL
  * through [openHelper].
  */
-@Database(entities = [RunEntity::class], version = 2, exportSchema = true)
+@Database(entities = [RunEntity::class], version = 3, exportSchema = true)
 abstract class TracerDatabase : RoomDatabase() {
     abstract fun runDao(): RunDao
 
@@ -34,7 +34,22 @@ abstract class TracerDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        /**
+         * Room v2 → v3: schema v3 adds no `runs` columns (location.is_mock, probe edge/IP columns
+         * and the `integrity` table are canonical tables, upgraded by [CanonicalSchema.onOpen]).
+         * The step still applies any `runs` statement of [Schema.migrationSql] (2) so the two stay
+         * in lock-step, and gives Room a registered path so the version bump never falls back to a
+         * destructive migration.
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Schema.migrationSql(2)
+                    .filter { SqlGuards.alterTarget(it)?.first == Schema.RUNS.name }
+                    .forEach { SqlGuards.exec(db, it) }
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         /**
          * @param name database file name; null builds an in-memory database (tests only).

@@ -31,8 +31,9 @@ import javax.inject.Inject
  * [probe_internal] — the local legs of each probed path, every max(latency interval, 2 s), for every
  * network of [ProbeNetworks.networksFor] (settings.paths):
  *  - probe_type "gateway": one ICMP echo to the default gateway (first IPv4 gateway of a default
- *    route) via `/system/bin/ping -c 1 -W 1 -I <ifname> <gw>`; skipped when there is no gateway
- *    (typical on cellular point-to-point links).
+ *    route) via `/system/bin/ping -c 1 -W 1 -I <ifname> <gw>`; Wi-Fi / ethernet only: never on
+ *    cellular (no meaningful LAN gateway on a point-to-point PDN link), and skipped when there is
+ *    no gateway.
  *  - probe_type "dns_server": one UDP DNS A query for [DNS_PROBE_QNAME] to each DHCP DNS server
  *    (max 3) on a socket bound to that network; http_status = DNS RCODE.
  * success = a reply arrived (ping reply / DNS response with our id); total_ms = round trip.
@@ -59,10 +60,12 @@ class InternalProbeCollector @Inject constructor(
             while (isActive) {
                 ctx.signals.awaitResumed()
                 val startedMs = SystemClock.elapsedRealtime()
+                val targets = networks.networksFor(paths)
                 val results = coroutineScope {
-                    networks.networksFor(paths).map { bound -> async { probeNetwork(ctx, bound) } }.awaitAll()
+                    targets.map { bound -> async { probeNetwork(ctx, bound) } }.awaitAll()
                 }
-                for (sample in results.flatten()) {
+                val rows = targets.zip(results).flatMap { (bound, samples) -> samples.filter { networks.keepRow(bound, it.success) } }
+                for (sample in rows) {
                     send(sample)
                     ctx.status.sample(id, sample.stamp.tMonoNs)
                 }
@@ -80,7 +83,9 @@ class InternalProbeCollector @Inject constructor(
         val dns = lp.dnsServers.take(MAX_DNS_SERVERS)
         val ifname = lp.interfaceName ?: bound.ifname
         val jobs = buildList<Deferred<ProbeSample>> {
-            if (gateway != null) add(async { pingGateway(ctx, bound, gateway, ifname) })
+            // Cellular: no meaningful LAN gateway (point-to-point PDN; the "gateway" is the carrier's
+            // P-GW side and often drops ICMP), so gateway rows would only be noise.
+            if (gateway != null && !bound.isCellular) add(async { pingGateway(ctx, bound, gateway, ifname) })
             dns.forEach { server -> add(async { queryDns(ctx, bound, server) }) }
         }
         jobs.awaitAll()

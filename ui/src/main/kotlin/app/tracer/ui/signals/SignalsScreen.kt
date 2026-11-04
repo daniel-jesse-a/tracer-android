@@ -162,7 +162,7 @@ private fun wifi(snap: LiveSnapshot): SignalUi {
 }
 
 private fun location(snap: LiveSnapshot): SignalUi {
-    val loc = snap.location
+    val loc = snap.rawLocation ?: snap.location
     val acc = loc?.hAccM
     val used = snap.usedSats
     val gps = loc?.provider == "gps" && used > 0

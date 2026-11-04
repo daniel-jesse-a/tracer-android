@@ -13,6 +13,9 @@ import app.tracer.core.schema.TableDef
 import app.tracer.core.model.CollectorLogSample
 import app.tracer.core.model.WaypointSample
 import app.tracer.core.model.WifiRoamSample
+import app.tracer.core.model.IntegritySample
+import app.tracer.core.model.ProbeSample
+import app.tracer.core.model.LocationSample
 import app.tracer.storage.db.SqlGuards
 import app.tracer.core.sim.Scenarios
 import app.tracer.core.sim.SyntheticRun
@@ -238,8 +241,12 @@ class StorageTest {
         val w = WaypointSample(runId, st, 1, "door B", 25.1, 55.2, 6.0, "fused")
         val roam = WifiRoamSample(runId, st, "Corp", "aa:aa:aa:aa:aa:01", "aa:aa:aa:aa:aa:02", "5", "6", -78, -55, 0L, 12.5, 20.0, 32.5, true, true, false)
         val log = CollectorLogSample(runId, st, "wifi_scan", "degraded", "throttled", 1)
-        listOf(w, roam, log).forEach { writer.emit(it) }
+        val integ = IntegritySample(runId, st, "tls_cert", "cellular", "cp.cloudflare.com", true, "ab".repeat(32), null)
+        val mock = LocationSample(runId, st.copy(gpsTimeMs = 5L), 25.0, 55.0, hAccM = 4.0, gpsTimeMs = 5L, provider = "gps", isMock = true)
+        listOf(w, roam, log, integ, mock).forEach { writer.emit(it) }
         writer.flush()
+        assertThat(repo.samples(runId, Table.INTEGRITY)).containsExactly(integ)
+        assertThat(repo.samples(runId, Table.LOCATION)).containsExactly(mock)
         assertThat(repo.samples(runId, Table.WAYPOINT)).containsExactly(w)
         assertThat(repo.samples(runId, Table.WIFI_ROAM)).containsExactly(roam)
         assertThat(repo.samples(runId, Table.X_COLLECTOR_LOG)).containsExactly(log)
@@ -252,8 +259,9 @@ class StorageTest {
         // every column already exists on a fresh v2 database → re-running the step is a no-op
         val sdb = db.openHelper.writableDatabase
         CanonicalMigrations.setStoredVersion(sdb, 1)
-        assertThat(CanonicalMigrations.migrate(sdb)).containsExactly(1)
+        assertThat(CanonicalMigrations.migrate(sdb)).containsExactly(1, 2).inOrder()
         assertThat(CanonicalMigrations.storedVersion(sdb)).isEqualTo(Schema.VERSION)
+        assertThat(CanonicalMigrations.registry.getValue(2).none { SqlGuards.alterTarget(it)?.first == "runs" }).isTrue()
     }
 
     // (6) Room v1 → v2 + canonical v1 → v2 on a database written by the v1 app
@@ -272,7 +280,8 @@ class StorageTest {
         }
         for (t in listOf("waypoint", "wifi_roam", "x_android_carrier", "x_collector_log")) assertWithMessage(t).that(tableExists(t)).isTrue()
         assertThat(CanonicalMigrations.storedVersion(sdb)).isEqualTo(Schema.VERSION)
-        sdb.query("PRAGMA user_version").use { c -> c.moveToFirst(); assertThat(c.getInt(0)).isEqualTo(2) }
+        sdb.query("PRAGMA user_version").use { c -> c.moveToFirst(); assertThat(c.getInt(0)).isEqualTo(3) }
+        assertWithMessage("integrity").that(tableExists("integrity")).isTrue()
 
         val old = repo.getRun("v1-run")
         assertThat(old).isNotNull()
@@ -297,22 +306,57 @@ class StorageTest {
         assertThat(repo.getRun("v1-run")?.site).isEqualTo("Office")
     }
 
+    // (7) Room v2 → v3 + canonical v2 → v3: new columns appended, integrity table created, old rows kept
+    @Test fun migratesV2DatabaseToV3() = runBlocking<Unit> {
+        closeAll()
+        context.deleteDatabase(TracerDatabase.NAME)
+        createOldDatabase(2)
+        open()
+        val sdb = db.openHelper.writableDatabase
+        for (td in Schema.all) {
+            val expected = if (td.table == Table.RUNS) td.columnNames else td.exportColumns
+            assertWithMessage(td.name).that(columns(td.name)).containsExactlyElementsIn(expected)
+        }
+        assertThat(CanonicalMigrations.storedVersion(sdb)).isEqualTo(Schema.VERSION)
+        sdb.query("PRAGMA user_version").use { c -> c.moveToFirst(); assertThat(c.getInt(0)).isEqualTo(3) }
+        val probe = repo.samples("v1-run", Table.PROBE).single() as ProbeSample
+        assertThat(probe.edgePop).isNull()
+        assertThat(probe.remoteIp).isNull()
+        val st = Stamp(1_760_000_000_000L, 9_000_000_000L, gpsTimeMs = 1_760_000_000_005L)
+        val integ = IntegritySample("v1-run", st, "dns_doh", "wifi", "www.google.com", false, "142.250.1.1|142.250.1.2", "{\"system\":[\"1.2.3.4\"]}")
+        val p3 = ProbeSample("v1-run", Stamp(st.tUtcMs, st.tMonoNs), "latency", "https://cp.cloudflare.com/generate_204", true, totalMs = 30.0,
+            remoteIp = "104.16.1.1", ipVersion = 4, edgePop = "DXB", edgeHeaders = "{\"cf-ray\":\"8a-DXB\"}", tlsCertSha256 = "ab".repeat(32))
+        writer.emit(integ); writer.emit(p3); writer.flush()
+        assertThat(repo.samples("v1-run", Table.INTEGRITY)).containsExactly(integ)
+        assertThat(repo.samples("v1-run", Table.PROBE)).contains(p3)
+    }
+
     /** Writes `tracer.db` exactly as the v1 app left it: Room user_version 1, v1 runs, v1 canonical DDL, meta = 1. */
-    private fun createV1Database() {
-        val v2Cols: Map<String, Set<String>> = Schema.migrationSql(1).mapNotNull { SqlGuards.alterTarget(it) }
+    private fun createV1Database() = createOldDatabase(1)
+
+    /**
+     * Writes `tracer.db` as the app at canonical/Room version [version] (1 or 2) left it: columns added by
+     * [Schema.migrationSql] (from ≥ version) are left out, tables introduced later are not created.
+     */
+    private fun createOldDatabase(version: Int) {
+        val laterCols: Map<String, Set<String>> = (version until Schema.VERSION).flatMap { Schema.migrationSql(it) }
+            .mapNotNull { SqlGuards.alterTarget(it) }
             .groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
-        val newTables = setOf(Table.WAYPOINT, Table.WIFI_ROAM, Table.X_ANDROID_CARRIER, Table.X_COLLECTOR_LOG)
-        fun v1(td: TableDef) = td.copy(columns = td.columns.filterNot { it.name in v2Cols[td.name].orEmpty() })
+        val newTables = buildSet {
+            if (version < 2) addAll(listOf(Table.WAYPOINT, Table.WIFI_ROAM, Table.X_ANDROID_CARRIER, Table.X_COLLECTOR_LOG))
+            if (version < 3) add(Table.INTEGRITY)
+        }
+        fun old(td: TableDef) = td.copy(columns = td.columns.filterNot { it.name in laterCols[td.name].orEmpty() })
         val file = context.getDatabasePath(TracerDatabase.NAME).apply { parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(file, null).use { raw ->
             for (td in Schema.all) {
                 if (td.table in newTables) continue
-                val d = v1(td)
+                val d = old(td)
                 raw.execSQL(d.createSql(ifNotExists = false))
                 d.indexSql().forEach { raw.execSQL(it) }
             }
             raw.execSQL("CREATE TABLE tracer_meta (key TEXT PRIMARY KEY, value TEXT)")
-            raw.execSQL("INSERT INTO tracer_meta (key, value) VALUES ('schema_version', '1')")
+            raw.execSQL("INSERT INTO tracer_meta (key, value) VALUES ('schema_version', '$version')")
             raw.execSQL(
                 "INSERT INTO runs (run_id, t_utc_ms, t_mono_ns, name, mode, device_platform, device_model, os_version, app_version, started_at, ended_at) " +
                     "VALUES ('v1-run', 1000, 5, 'Old run', 'walk', 'android', 'Pixel 9', '16', '1.0.8', 1000, 2000)",
@@ -325,14 +369,19 @@ class StorageTest {
                 "INSERT INTO wifi_scan (run_id, t_utc_ms, t_mono_ns, scan_id, bssid, rssi_dbm, frequency_mhz) " +
                     "VALUES ('v1-run', 1200, 200000000, 1, 'aa:bb:cc:dd:ee:ff', -60, 5180)",
             )
-            raw.version = 1
+            raw.version = version
         }
-        // sanity: really v1
+        // sanity: really the old layout
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { ro ->
             ro.rawQuery("PRAGMA table_info(runs)", null).use { c ->
                 val n = c.getColumnIndexOrThrow("name")
                 val cols = buildList { while (c.moveToNext()) add(c.getString(n)) }
-                assertThat(cols).doesNotContain("site")
+                if (version < 2) assertThat(cols).doesNotContain("site")
+            }
+            ro.rawQuery("PRAGMA table_info(probe)", null).use { c ->
+                val n = c.getColumnIndexOrThrow("name")
+                val cols = buildList { while (c.moveToNext()) add(c.getString(n)) }
+                assertThat(cols).doesNotContain("edge_pop")
             }
         }
     }

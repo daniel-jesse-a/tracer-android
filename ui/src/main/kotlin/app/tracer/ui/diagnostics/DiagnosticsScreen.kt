@@ -134,13 +134,13 @@ private fun rowsOf(r: TestReport): List<Row7> {
         else -> null to Verdict.NONE
     }
     return listOf(
-        Row7(Icons.Outlined.CheckCircle, "Online", r.onlinePct?.let { "${it.roundToInt()}%" } ?: "—", r.onlineVerdict),
-        Row7(Icons.Outlined.Wifi, "Wi-Fi signal", r.wifiRssiMedian?.dbm() ?: "—", r.wifiVerdict),
-        Row7(Icons.Outlined.SignalCellularAlt, "Mobile signal", r.rsrpMedian?.dbm() ?: "—", r.mobileVerdict),
-        Row7(Icons.Outlined.Download, "Download", dlValue?.let { "${it.roundToInt()}" } ?: "—", dlVerdict),
-        Row7(Icons.Outlined.Schedule, "Response", r.responseMs?.let { "≤${it.roundToInt()}" } ?: "—", r.responseVerdict),
-        Row7(Icons.Outlined.LocationOn, "Position", r.positionAccM?.let { "±${it.roundToInt()} m" } ?: "—", r.positionVerdict),
-        Row7(Icons.Outlined.Description, "Test quality", r.checksPassedPct?.let { "${it.roundToInt()}%" } ?: "—", r.qualityVerdict),
+        Row7(Icons.Outlined.CheckCircle, "Online", r.onlinePct?.let { "${it.roundToInt()}%" } ?: "–", r.onlineVerdict),
+        Row7(Icons.Outlined.Wifi, "Wi-Fi signal", if (r.wifiTested) r.wifiRssiMedian?.dbm() ?: "–" else "Not tested", if (r.wifiTested) r.wifiVerdict else Verdict.NONE),
+        Row7(Icons.Outlined.SignalCellularAlt, "Mobile signal", if (r.mobileTested) r.rsrpMedian?.dbm() ?: "–" else "Not tested", if (r.mobileTested) r.mobileVerdict else Verdict.NONE),
+        Row7(Icons.Outlined.Download, "Download", dlValue?.let { "${it.roundToInt()}" } ?: "–", dlVerdict),
+        Row7(Icons.Outlined.Schedule, "Response", r.responseMs?.let { "≤${it.roundToInt()}" } ?: "–", r.responseVerdict),
+        Row7(Icons.Outlined.LocationOn, "Position", r.positionAccM?.let { "±${it.roundToInt()} m" } ?: "–", r.positionVerdict),
+        Row7(Icons.Outlined.Description, "Test quality", r.checksPassedPct?.let { "${it.roundToInt()}%" } ?: "–", r.qualityVerdict),
     )
 }
 
@@ -389,15 +389,15 @@ private fun MovementCard(r: TestReport) {
 
 @Composable
 private fun Detailed(r: TestReport, onMoment: (Int) -> Unit, onReplay: (Long?) -> Unit, onWorst: () -> Unit) {
-    fun fmtDbm(v: Double?) = v?.let { "${it.dbm()} dBm" } ?: "—"
-    fun ms(v: Double?) = v?.let { "${it.roundToInt()} ms" } ?: "—"
+    fun fmtDbm(v: Double?) = v?.let { "${it.dbm()} dBm" } ?: "–"
+    fun ms(v: Double?) = v?.let { "${it.roundToInt()} ms" } ?: "–"
     val numbers: List<Pair<String, String>> = buildList {
         add("Wi-Fi RSSI median" to fmtDbm(r.wifiRssiMedian))
         add("Wi-Fi RSSI worst" to fmtDbm(r.wifiRssiWorst))
         add("Mobile RSRP median" to fmtDbm(r.rsrpMedian))
-        add("Mobile SINR median" to (r.sinrMedian?.let { "${it.roundToInt()} dB" } ?: "—"))
-        add("Mobile technology" to ((r.mobileTech ?: "—") + if (r.nrSeen && r.mobileTech != "5G") " · 5G seen" else ""))
-        add("Mobile band" to (r.mobileBand ?: "—"))
+        add("Mobile SINR median" to (r.sinrMedian?.let { "${it.roundToInt()} dB" } ?: "–"))
+        add("Mobile technology" to ((r.mobileTech ?: "–") + if (r.nrSeen && r.mobileTech != "5G") " · 5G seen" else ""))
+        add("Mobile band" to (r.mobileBand ?: "–"))
         add("Response · Wi-Fi median" to ms(r.responseWifiMs))
         add("Response · mobile median" to ms(r.responseMobileMs))
         val lo = r.responseMobileMinMs; val hi = r.responseMobileMaxMs
@@ -406,17 +406,17 @@ private fun Detailed(r: TestReport, onMoment: (Int) -> Unit, onReplay: (Long?) -
         add("Access point changes" to "${r.apChanges}")
         add("Checks" to "${r.checks}" + (r.checksPassedPct?.let { " · ${it.roundToInt()}% passed" } ?: ""))
         add("False drops" to "${r.falseDrops}")
-        add("On schedule" to (r.onSchedulePct?.let { "${it.roundToInt()}%" } ?: "—"))
+        add("On schedule" to (r.onSchedulePct?.let { "${it.roundToInt()}%" } ?: "–"))
         add("Positions" to "${r.positions}")
         add("GPS fixes" to "${r.gpsFixes}")
-        add("Satellites used (max)" to (r.satellitesMax?.toString() ?: "—"))
-        add("Position source" to (r.positionSource ?: "—"))
-        add("Device" to r.deviceModel.ifBlank { "—" })
-        add("App version" to r.appVersion.ifBlank { "—" })
+        add("Satellites used (max)" to (r.satellitesMax?.toString() ?: "–"))
+        add("Position source" to (r.positionSource ?: "–"))
+        add("Device" to r.deviceModel.ifBlank { "–" })
+        add("App version" to r.appVersion.ifBlank { "–" })
     }
     Caption("Engineer numbers")
     GroupCard(rows = numbers.map<Pair<String, String>, @Composable () -> Unit> { (k, v) -> { ListRow(k, v) } } +
-        listOf<@Composable () -> Unit>({ ListRow("Method", sub = r.methodFingerprint ?: "—") }), inset = 18.dp)
+        listOf<@Composable () -> Unit>({ ListRow("Method", sub = r.methodFingerprint ?: "–") }), inset = 18.dp)
 
     if (r.moments.isNotEmpty()) {
         Caption("Moments")

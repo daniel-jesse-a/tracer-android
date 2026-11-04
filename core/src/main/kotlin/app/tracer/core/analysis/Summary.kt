@@ -20,13 +20,28 @@ class SummaryBuilder(private val run: RunRecord) {
         fun list(): List<Double> = a.copyOf(n).toList()
     }
 
+    /** v3: which server answered (remote address, IP version, edge PoP) — counts per value. */
+    private class ServerAgg { val remoteIps = sortedMapOf<String, Int>(); val ipVersions = sortedMapOf<String, Int>(); val edgePops = sortedMapOf<String, Int>()
+        fun add(p: ProbeSample) {
+            p.remoteIp?.let { remoteIps.merge(it, 1, Int::plus) }
+            p.ipVersion?.let { ipVersions.merge(it.toString(), 1, Int::plus) }
+            p.edgePop?.let { edgePops.merge(it, 1, Int::plus) }
+        }
+        fun into(o: JsonObjectBuilder) {
+            o.putJsonObject("remote_ips") { remoteIps.forEach { (k, v) -> put(k, v) } }
+            o.putJsonObject("ip_versions") { ipVersions.forEach { (k, v) -> put(k, v) } }
+            o.putJsonObject("edge_pops") { edgePops.forEach { (k, v) -> put(k, v) } }
+        }
+    }
+
     private class EndpointAgg { var n = 0; var reachable = 0; var expected = 0; var expectedKnown = 0
-        val errors = HashMap<String, Int>() }
+        val errors = HashMap<String, Int>(); val servers = ServerAgg() }
 
     private class PathAgg {
         val endpoints = sortedMapOf<String, EndpointAgg>()
         val dns = Vals(); val connect = Vals(); val tls = Vals(); val ttfb = Vals(); val total = Vals()
         val mbps = Vals(); var throughputBytes = 0L; var throughputN = 0; var throughputFail = 0
+        val throughputMs = Vals(); val throughputServers = ServerAgg()
         val gateway = Vals(); var gatewayN = 0; var gatewayOk = 0
         val dnsServer = Vals(); var dnsServerN = 0; var dnsServerOk = 0
     }
@@ -50,12 +65,19 @@ class SummaryBuilder(private val run: RunRecord) {
     private val nrStates = sortedMapOf<String, Int>()
     private var waypoints = 0
     private val rows = sortedMapOf<String, Long>()
+    private val coverage = CoverageTracker(run)
+    private val movement = MovementTracker()
+    private var mockFixes = 0
+    private class IntegrityAgg { var n = 0; var ok = 0; var failed = 0; var untested = 0 }
+    private val integrityByKind = sortedMapOf<String, IntegrityAgg>()
+    private val integrityLatest = sortedMapOf<String, IntegritySample>()
 
     fun add(s: Sample) {
         rows.merge(s.table.sqlName, 1L, Long::plus)
         val t = s.stamp.tMonoNs
         if (t < firstMono) firstMono = t
         if (t > lastMono) lastMono = t
+        coverage.add(s)
         when (s) {
             is ProbeSample -> addProbe(s)
             is WifiConnectionSample -> wifiRssi.add(s.rssiDbm?.toDouble())
@@ -72,7 +94,14 @@ class SummaryBuilder(private val run: RunRecord) {
             }
             is WifiRoamSample -> { roams++; roamPenalty.add(s.latencyPenaltyMs); roamLinkDown.add(s.linkDownMs?.toDouble()) }
             is NetworkPathSample -> pathChanges += t to (s.primaryInterface?.takeIf { s.status == "satisfied" } ?: "none")
-            is LocationSample -> { locByProvider.merge(s.provider, 1, Int::plus); hAcc.add(s.hAccM) }
+            is LocationSample -> { locByProvider.merge(s.provider, 1, Int::plus); hAcc.add(s.hAccM); movement.add(s); if (s.isMock == true) mockFixes++ }
+            is IntegritySample -> {
+                val a = integrityByKind.getOrPut(s.kind) { IntegrityAgg() }
+                a.n++; when (s.ok) { true -> a.ok++; false -> a.failed++; null -> a.untested++ }
+                val key = "${s.kind}|${s.path ?: ""}|${s.target}"
+                val prev = integrityLatest[key]
+                if (prev == null || s.stamp.tMonoNs >= prev.stamp.tMonoNs) integrityLatest[key] = s
+            }
             is RadioSample -> { radioRows++; if (s.rat.startsWith("NR")) nrRadioRows++; s.nrState?.let { nrStates.merge(it, 1, Int::plus) } }
             is WaypointSample -> waypoints++
             else -> {}
@@ -92,8 +121,12 @@ class SummaryBuilder(private val run: RunRecord) {
                 p.expectedResponse?.let { e.expectedKnown++; if (it) e.expected++ }
                     ?: run { if (p.httpStatus == null && p.reachable) { /* v1 rows: unknown */ } }
                 if (p.reachable) { a.dns.add(p.dnsMs); a.connect.add(p.connectMs); a.tls.add(p.tlsMs); a.ttfb.add(p.ttfbMs); a.total.add(p.totalMs) }
+                e.servers.add(p)
             }
-            "throughput" -> { a.throughputN++; if (p.success) { a.mbps.add(p.mbps); a.throughputBytes += p.bytes ?: 0 } else a.throughputFail++ }
+            "throughput" -> {
+                a.throughputN++; a.throughputServers.add(p)
+                if (p.success) { a.mbps.add(p.mbps); a.throughputBytes += p.bytes ?: 0; a.throughputMs.add(p.totalMs) } else a.throughputFail++
+            }
             "gateway" -> { a.gatewayN++; if (p.success) { a.gatewayOk++; a.gateway.add(p.totalMs) } }
             "dns_server" -> { a.dnsServerN++; if (p.success) { a.dnsServerOk++; a.dnsServer.add(p.totalMs) } }
         }
@@ -107,7 +140,7 @@ class SummaryBuilder(private val run: RunRecord) {
 
     fun build(settings: RunSettings?): JsonObject = buildJsonObject {
         val durMs = run.endedAt?.let { it - run.startedAt } ?: if (lastMono > firstMono) (lastMono - firstMono) / 1_000_000 else 0
-        put("summary_version", 1)
+        put("summary_version", 2)
         put("run_id", run.runId); put("name", run.name); put("site", run.site); put("test_number", run.testNumber)
         put("protocol", run.protocol); put("mode", run.mode); put("device_model", run.deviceModel); put("os_version", run.osVersion)
         put("app_version", run.appVersion); put("time_zone", run.timeZone); put("started_at_utc_ms", run.startedAt); put("duration_s", durMs / 1000)
@@ -115,6 +148,15 @@ class SummaryBuilder(private val run: RunRecord) {
             put("method_fingerprint", run.methodFingerprint
                 ?: run.settingsJson?.let { j -> Method.fingerprintOfRecorded(j, run.protocol) } ?: Method.fingerprint(it, run.protocol))
             put("method", Method.canonical(it, run.protocol))
+        }
+        val cov = coverage.build()
+        put("captured_s", Math.round(cov.capturedMs / 100.0) / 10.0)
+        put("coverage_pct", cov.coveragePct)
+        put("gaps", cov.gapCount)
+        put("coverage", cov.toJson())
+        putJsonObject("event_rules") {
+            put("cause_window_s", (settings?.thresholds ?: app.tracer.core.config.Thresholds()).causeWindowMs / 1000.0)
+            put("stall_threshold_s", CoverageTracker.STALL_MS / 1000.0)
         }
 
         putJsonObject("paths") {
@@ -133,11 +175,15 @@ class SummaryBuilder(private val run: RunRecord) {
                         put("n", e.n); put("reachable_rate", r3(e.reachable.toDouble() / e.n))
                         put("expected_response_rate", if (e.expectedKnown > 0) r3(e.expected.toDouble() / e.expectedKnown) else null)
                         putJsonObject("errors") { e.errors.toSortedMap().forEach { (k, v) -> put(k, v) } }
+                        e.servers.into(this)
                     }
                 }
                 putJsonObject("throughput_mbps") {
                     val l = a.mbps.list(); put("n", a.throughputN); put("failed", a.throughputFail)
                     put("median", r1(Stats.median(l))); put("max", r1(l.maxOrNull())); put("bytes", a.throughputBytes)
+                    // actual test duration (time-boxed by throughput_max_ms)
+                    put("duration_ms_median", r1(Stats.median(a.throughputMs.list())))
+                    a.throughputServers.into(this)
                 }
                 putJsonObject("internal") {
                     // gateway RTT = the Wi-Fi/radio link; connect − gateway ≈ upstream
@@ -178,6 +224,20 @@ class SummaryBuilder(private val run: RunRecord) {
             putJsonObject("fixes_by_provider") { locByProvider.forEach { (k, v) -> put(k, v) } }
             put("h_acc_median_m", r1(Stats.median(hAcc.list())))
             put("waypoints", waypoints)
+            put("mock_fixes", mockFixes)
+        }
+        put("movement", movement.build().toJson())
+        putJsonObject("integrity") {
+            put("checks", integrityByKind.values.sumOf { it.n })
+            put("ok", integrityByKind.values.sumOf { it.ok }); put("failed", integrityByKind.values.sumOf { it.failed })
+            put("untested", integrityByKind.values.sumOf { it.untested })
+            putJsonObject("by_kind") { integrityByKind.forEach { (k, a) -> putJsonObject(k) { put("n", a.n); put("ok", a.ok); put("failed", a.failed); put("untested", a.untested) } } }
+            putJsonArray("latest") {
+                integrityLatest.values.forEach { i -> addJsonObject {
+                    put("kind", i.kind); put("path", i.path); put("target", i.target); put("ok", i.ok); put("value", i.value)
+                    put("t_run_s", if (run.tMonoNs > 0) Math.round((i.stamp.tMonoNs - run.tMonoNs) / 1e8) / 10.0 else null)
+                } }
+            }
         }
         putJsonObject("rows") { rows.forEach { (k, v) -> put(k, v) } }
     }

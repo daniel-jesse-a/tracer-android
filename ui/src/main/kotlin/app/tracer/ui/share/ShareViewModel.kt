@@ -101,7 +101,7 @@ class ShareViewModel @Inject constructor(
                 val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
                 val note = if (big.isNotEmpty()) {
                     val where = files.saveToDownloads(big)
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email — saved to $where on the phone."
+                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email, so it was saved to $where on the phone."
                 } else null
                 _pendingEmail.value = files.emailIntent(run, report, list - big.toSet(), u.recipients, note)
                 "Opened email to ${u.recipients.joinToString()}"

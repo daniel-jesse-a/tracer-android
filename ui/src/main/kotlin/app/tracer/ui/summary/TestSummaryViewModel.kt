@@ -96,6 +96,16 @@ class TestSummaryViewModel @Inject constructor(
 
     private var autoChecked = false
 
+    /** Recipients to confirm with the user before the auto email step (null = no prompt). */
+    private val _askEmail = MutableStateFlow<List<String>?>(null)
+    val askEmail: StateFlow<List<String>?> = _askEmail.asStateFlow()
+
+    fun confirmEmail() { _askEmail.value = null; email(auto = true) }
+    fun declineEmail(never: Boolean) {
+        _askEmail.value = null
+        if (never) viewModelScope.launch { settings.setAutoEmail(false) }
+    }
+
     init {
         viewModelScope.launch {
             state.collect { st ->
@@ -109,7 +119,7 @@ class TestSummaryViewModel @Inject constructor(
                 if (fresh && own && settings.autoEmail.first() && run.runId !in settings.emailedRuns.first() &&
                     settings.emailRecipients.first().isNotEmpty()) {
                     settings.markEmailed(run.runId)
-                    email(auto = true)
+                    _askEmail.value = settings.emailRecipients.first()
                 }
             }
         }
@@ -145,9 +155,9 @@ class TestSummaryViewModel @Inject constructor(
                 val where = files.saveToDownloads(list)
                 val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
                 val note = if (big.isNotEmpty())
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email — it is saved on the phone in $where." else null
+                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email. It is saved on the phone in $where." else null
                 _email.value = files.emailIntent(ready.run, ready.report, list - big.toSet(), to, note)
-                _delivery.value = Delivery(text = "Email to ${to.joinToString()} — tap Send. Copy saved to $where.")
+                _delivery.value = Delivery(text = "Email to ${to.joinToString()}: tap Send. Copy saved to $where.")
             } catch (e: Exception) {
                 Log.w(TAG, "email failed", e)
                 _delivery.value = Delivery(text = "Email failed: ${e.message ?: e.javaClass.simpleName}", failed = true)

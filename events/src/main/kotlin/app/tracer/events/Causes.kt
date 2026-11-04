@@ -25,20 +25,25 @@ object Cause {
     const val CAPTIVE = "captive_portal"
     const val DNS = "dns_issue"
     const val GATEWAY = "carrier_gateway_change"
+    /** first DNS query lost while the radio woke; the answer came on the resolver's retry timer (~2 s / ~5 s) */
+    const val DNS_RETRY_TIMER = "dns_retry_timer"
 }
 
 data class Candidate(val cause: String, val confidence: Double, val signals: JsonObject)
 
 data class Diagnosis(val best: Candidate?, val candidates: List<Candidate>) {
-    fun evidenceJson(snapshot: JsonObject): String = buildJsonObject {
-        put("window_ms", CauseEngine.NEAR_MS)
+    fun evidenceJson(snapshot: JsonObject, windowMs: Long = CauseEngine.NEAR_MS): String = evidence(snapshot, windowMs).toString()
+
+    fun evidence(snapshot: JsonObject, windowMs: Long = CauseEngine.NEAR_MS): JsonObject = buildJsonObject {
+        put("window_ms", windowMs)
+        put("window_s", windowMs / 1000.0)
         putJsonArray("candidates") {
             candidates.sortedByDescending { it.confidence }.forEach { c ->
                 addJsonObject { put("cause", c.cause); put("confidence", c.confidence); put("signals", c.signals) }
             }
         }
         put("snapshot", snapshot)
-    }.toString()
+    }
 }
 
 /**
@@ -60,6 +65,7 @@ data class Diagnosis(val best: Candidate?, val candidates: List<Candidate>) {
 class CauseEngine {
     companion object {
         const val MIN_CONFIDENCE = 0.4
+        /** Default of thresholds.cause_lookback_s (2 s); the engine uses [Context.nearMs]. */
         const val NEAR_MS = 2_000L
         private fun r2(x: Double) = Math.round(x * 100) / 100.0
         private fun med(xs: List<Double>) = Stats.median(xs)
@@ -68,8 +74,8 @@ class CauseEngine {
     /** Values a cause can read at event time T. */
     /** @param transition for roam / Wi-Fi→cell events the relevant Wi-Fi state is the one *left* (last report before T) */
     class At(val ctx: Context, val t: Long, transition: Boolean = false) {
-        private val lo = t - NEAR_MS
-        private val hi = t + NEAR_MS
+        private val lo = t - ctx.nearMs
+        private val hi = t + ctx.nearMs
         val serving: List<CellSample> = ctx.servingHistory.values.flatMap { it.between(lo, hi) }.filter { (it.cellinfoAgeMs ?: 0) <= ctx.th.cellStaleMs }
         val rsrp: Double? = med(serving.mapNotNull { it.rsrp?.toDouble() })
         val sinr: Double? = med(serving.mapNotNull { it.sinr?.toDouble() })
@@ -93,6 +99,8 @@ class CauseEngine {
 
     fun diagnose(eventType: String, ctx: Context, tMs: Long = ctx.nowMs, extra: JsonObject = JsonObject(emptyMap())): Diagnosis {
         val th = ctx.th
+        val near = ctx.nearMs
+        val afterResume = extra["after_resume"]?.jsonPrimitive?.booleanOrNull == true
         val at = At(ctx, tMs, transition = eventType == EventType.WIFI_ROAM || eventType == EventType.WIFI_CELL_SWITCH)
         val c = mutableListOf<Candidate>()
 
@@ -114,17 +122,24 @@ class CauseEngine {
             val cn0Before = med(base.mapNotNull { it.meanTopCn0 })
             val rsrpBefore = med(ctx.servingHistory.values.flatMap { it.between(tMs - 45_000, tMs - 15_000) }.mapNotNull { it.rsrp?.toDouble() })
             val ratBefore = ctx.radioHistory.lastAtOrBefore(tMs - 15_000)?.rat
-            val ratDown = ratBefore != null && at.radio != null && Context.ratRank(at.radio.rat) < Context.ratRank(ratBefore)
+            // a RAT downgrade only counts when it is sustained (> 5 s): 5G→LTE→5G flickers are not tunnels
+            val heldMs = if (ratBefore != null) ctx.downgradeHeldMs(tMs, ratBefore, at.radio?.serviceId, ctx.nowMs) else 0L
+            val ratDown = heldMs > Context.RAT_SUSTAIN_MS
             val gnssCollapse = usedBefore != null && at.used != null && at.used <= th.tunnelMaxUsedSats && at.used <= usedBefore * 0.5
             val cn0Collapse = cn0Before != null && at.cn0 != null && cn0Before - at.cn0 >= th.tunnelCn0DropDb
             val rsrpDrop = rsrpBefore != null && at.rsrp != null && rsrpBefore - at.rsrp >= th.signalDropDb
-            if (gnssCollapse && (rsrpDrop || ratDown)) {
+            // RAT changes need all three (sustained downgrade + signal drop + GNSS loss); other events
+            // need GNSS loss + (signal drop or sustained downgrade). Never right after a resume.
+            val tunnel = !afterResume && gnssCollapse &&
+                if (eventType == EventType.RAT_CHANGE) ratDown && rsrpDrop else (rsrpDrop || ratDown)
+            if (tunnel) {
                 var conf = 0.65
                 if (cn0Collapse) conf += 0.15
                 if (rsrpDrop && ratDown) conf += 0.05
                 c += Candidate(Cause.TUNNEL, r2(conf), buildJsonObject {
                     put("used_sats_baseline", usedBefore); put("used_sats_at_t", at.used); put("cn0_baseline", cn0Before); put("cn0_at_t", at.cn0)
                     put("rsrp_baseline", rsrpBefore); put("rsrp_at_t", at.rsrp); put("rat_baseline", ratBefore); put("rat_at_t", at.radio?.rat)
+                    put("rat_downgrade_held_ms", heldMs)
                 })
             }
             // cell edge: weak signal or far from the site *at T*
@@ -143,7 +158,7 @@ class CauseEngine {
         if (cellularDomain && (eventType == EventType.DROP || eventType == EventType.SIGNAL_DROP || eventType == EventType.LATENCY_SPIKE)) {
             // precursor event: an overtake ≤ 15 s before and no handover since
             val ot = ctx.overtakes.between(tMs - 15_000, tMs)
-            val hoSince = ctx.handoverTimes.between(tMs - 15_000, tMs + NEAR_MS).size
+            val hoSince = ctx.handoverTimes.between(tMs - 15_000, tMs + near).size
             if (ot.isNotEmpty() && hoSince == 0) {
                 c += Candidate(Cause.LATE_HANDOVER, if (eventType == EventType.DROP) 0.8 else 0.65, buildJsonObject {
                     putJsonArray("overtaking_neighbours") { ot.distinct().forEach { add(it) } }; put("handovers_since", hoSince)
@@ -159,7 +174,7 @@ class CauseEngine {
             }
         }
         if (cellularDomain && perfEvent && at.rsrp != null) {
-            val noChange = ctx.cellChangeTimes.between(tMs - 30_000, tMs + NEAR_MS).isEmpty()
+            val noChange = ctx.cellChangeTimes.between(tMs - 30_000, tMs + near).isEmpty()
             if (at.rsrp > th.goodRsrp && (at.sinr == null || at.sinr > th.goodSinr) && noChange) {
                 c += Candidate(Cause.CONGESTION, if (eventType == EventType.DROP) 0.5 else 0.7, buildJsonObject {
                     put("rsrp_at_t", at.rsrp); put("sinr_at_t", at.sinr); put("cell_changes_30s", 0)
@@ -185,14 +200,14 @@ class CauseEngine {
                 if (same >= th.channelCongestionAps) c += Candidate(Cause.CHANNEL_CONGESTION, 0.5, buildJsonObject { put("aps_on_channel", same); put("frequency_mhz", f) })
             }
             if (eventType != EventType.WIFI_ROAM) {
-                val roams = ctx.roamTimes.between(tMs - 10_000, tMs + NEAR_MS)
+                val roams = ctx.roamTimes.between(tMs - 10_000, tMs + near)
                 if (roams.isNotEmpty()) c += Candidate(Cause.WIFI_ROAM_TRANSITION, 0.65, buildJsonObject { put("roams_10s", roams.size); put("security", w?.security) })
             }
             if (perfEvent && path == "wifi") {
                 // split link vs upstream with the gateway probe at T
                 val gw = at.internal.filter { it.probeType == "gateway" && ctx.pathOf(it) == "wifi" }
                 val gwNow = med(gw.filter { it.success }.mapNotNull { it.totalMs })
-                val gwBase = med(ctx.internalProbes.between(tMs - 60_000, tMs - NEAR_MS).filter { it.probeType == "gateway" && it.success && ctx.pathOf(it) == "wifi" }.mapNotNull { it.totalMs })
+                val gwBase = med(ctx.internalProbes.between(tMs - 60_000, tMs - near).filter { it.probeType == "gateway" && it.success && ctx.pathOf(it) == "wifi" }.mapNotNull { it.totalMs })
                 val gwLost = gw.isNotEmpty() && gw.none { it.success }
                 if (gwNow != null && gwBase != null) {
                     if (gwNow > 3 * gwBase && gwNow > 50) {
@@ -223,6 +238,12 @@ class CauseEngine {
         }
 
         // ================= DNS =================
+        if (eventType == EventType.DNS_SPIKE && extra["dns_retry_timer"]?.jsonPrimitive?.booleanOrNull == true) {
+            c += Candidate(Cause.DNS_RETRY_TIMER, 0.85, buildJsonObject {
+                put("dns_ms", extra["dns_ms"] ?: JsonNull); put("idle_before_ms", extra["dns_idle_ms"] ?: JsonNull)
+                put("after_resume", afterResume)
+            })
+        }
         if (eventType == EventType.DNS_SPIKE || eventType == EventType.LATENCY_SPIKE || eventType == EventType.DROP) {
             val near = at.probesOn(path)
             val dnsErrors = near.count { it.error == "dns" }

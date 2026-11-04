@@ -17,8 +17,8 @@ import org.junit.runner.RunWith
 
 /**
  * Writes a database exactly as the v1 app left it (Room user_version 1, v1 `runs`, v1 canonical
- * sample DDL, tracer_meta = 1), runs Room's 1 → 2 migration validated against the exported v2
- * schema, then opens it with the real database class (canonical v1 → v2 in onOpen).
+ * sample DDL, tracer_meta = 1), runs Room's 1 → 2 → 3 migrations validated against the exported v3
+ * schema, then opens it with the real database class (canonical v1 → v3 in onOpen).
  *
  * The v1 database is built by hand rather than from an exported 1.json, because the repository
  * only keeps the schema JSON Room generates for the current version.
@@ -32,11 +32,11 @@ class TracerDatabaseMigrationTest {
     val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), TracerDatabase::class.java)
 
     @Test
-    fun migrateV1ToV2AndValidate() {
+    fun migrateV1ToV3AndValidate() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         context.deleteDatabase(dbName)
-        val v2Cols = Schema.migrationSql(1).mapNotNull { SqlGuards.alterTarget(it) }.groupBy({ it.first }, { it.second })
-        val newTables = setOf(Table.WAYPOINT, Table.WIFI_ROAM, Table.X_ANDROID_CARRIER, Table.X_COLLECTOR_LOG)
+        val v2Cols = (1 until Schema.VERSION).flatMap { Schema.migrationSql(it) }.mapNotNull { SqlGuards.alterTarget(it) }.groupBy({ it.first }, { it.second })
+        val newTables = setOf(Table.WAYPOINT, Table.WIFI_ROAM, Table.X_ANDROID_CARRIER, Table.X_COLLECTOR_LOG, Table.INTEGRITY)
         val file = context.getDatabasePath(dbName).apply { parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(file, null).use { raw ->
             for (td in Schema.all) {
@@ -54,8 +54,9 @@ class TracerDatabaseMigrationTest {
             raw.version = 1
         }
 
-        // Room's view: runs matches the exported v2 schema after MIGRATION_1_2 (sample tables are not Room's).
-        helper.runMigrationsAndValidate(dbName, 2, false, *TracerDatabase.MIGRATIONS).close()
+        // Room's view: runs matches the exported current (v3) schema after MIGRATION_1_2 + MIGRATION_2_3
+        // (sample tables are not Room's).
+        helper.runMigrationsAndValidate(dbName, 3, false, *TracerDatabase.MIGRATIONS).close()
 
         val db = TracerDatabase.build(context, dbName)
         try {

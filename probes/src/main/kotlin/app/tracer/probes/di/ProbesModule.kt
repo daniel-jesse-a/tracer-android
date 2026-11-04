@@ -4,6 +4,7 @@ import app.tracer.core.runtime.Collector
 import app.tracer.core.runtime.NtpClient
 import app.tracer.core.runtime.TowerLookup
 import app.tracer.probes.CaptiveProbeCollector
+import app.tracer.probes.IntegrityCollector
 import app.tracer.probes.InternalProbeCollector
 import app.tracer.probes.LatencyProbeCollector
 import app.tracer.probes.OpenCellIdTowerLookup
@@ -37,6 +38,7 @@ abstract class ProbesModule {
     @Binds @IntoSet abstract fun bindPublicIp(x: PublicIpProbeCollector): Collector
     @Binds @IntoSet abstract fun bindCaptive(x: CaptiveProbeCollector): Collector
     @Binds @IntoSet abstract fun bindInternal(x: InternalProbeCollector): Collector
+    @Binds @IntoSet abstract fun bindIntegrity(x: IntegrityCollector): Collector
 
     @Binds @Singleton abstract fun bindNtp(impl: SntpClient): NtpClient
     @Binds @Singleton abstract fun bindTowerLookup(impl: OpenCellIdTowerLookup): TowerLookup

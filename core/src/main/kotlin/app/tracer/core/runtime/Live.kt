@@ -19,7 +19,10 @@ data class LiveSnapshot(
     val startedMonoNs: Long? = null,
     val elapsedMs: Long = 0,
     val pausedMs: Long = 0,
+    /** Filtered display position (PositionFilter); hAccM is the estimate's accuracy. */
     val location: LocationSample? = null,
+    /** Latest raw fix as recorded (any provider). */
+    val rawLocation: LocationSample? = null,
     val distanceM: Double = 0.0,
     val transport: String? = null,
     val pathStatus: String? = null,
@@ -61,6 +64,9 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
     private val latencyWindow = Ring<Pair<Double?, Boolean>>(30)
     private val recentEvents = Ring<EventSample>(50)
     private val track = ArrayList<TrackPoint>()
+    private val positionFilter = app.tracer.core.geo.PositionFilter()
+    /** latest motion-recognition verdict (null = unknown) */
+    private var still: Boolean? = null
     private var pendingSats = mutableListOf<SatView>()
     private var pendingSatStamp = -1L
     private var pendingScanId = -1L
@@ -73,6 +79,7 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
         snapshot = LiveSnapshot(runId = runId, state = state, startedMonoNs = startedMonoNs)
         latencyWindow.clear(); recentEvents.clear(); track.clear(); pendingSats.clear(); pendingScan.clear()
         pendingServing.clear(); pendingNeigh.clear(); pollStamp.clear()
+        positionFilter.reset(); still = null
     }
 
     fun setState(state: RunState) { snapshot = snapshot.copy(state = state) }
@@ -85,23 +92,26 @@ class LiveAggregator(private val minTrackStepM: Double = 5.0, private val maxTra
         var sn = snapshot
         when (s) {
             is LocationSample -> {
-                if (s.provider != "gps" && sn.location?.provider == "gps" && s.stamp.tMonoNs - sn.location.stamp.tMonoNs < 5_000_000_000L) {
-                    snapshot = sn; return // raw GPS is fresh; fused is comparison data only
-                }
+                // One stable display position from the mixed providers (see PositionFilter);
+                // raw fixes are stored untouched by the writer.
+                val f = positionFilter.add(s, still) ?: run { snapshot = sn; return }
                 val prev = sn.location
-                val step = prev?.let { Geo.haversineM(it.lat, it.lon, s.lat, s.lon) } ?: 0.0
-                sn = sn.copy(location = s, distanceM = sn.distanceM + if (step < 500) step else 0.0)
+                val step = prev?.let { Geo.haversineM(it.lat, it.lon, f.lat, f.lon) } ?: 0.0
+                sn = sn.copy(location = f, rawLocation = s, distanceM = sn.distanceM + if (step < 500) step else 0.0)
                 val last = track.lastOrNull()
-                if (last == null || Geo.haversineM(last.lat, last.lon, s.lat, s.lon) >= minTrackStepM) {
+                if (last == null || Geo.haversineM(last.lat, last.lon, f.lat, f.lon) >= minTrackStepM) {
                     val serving = sn.primaryServing
                     val lat = latencyWindow.last()
-                    track += TrackPoint(s.lat, s.lon, s.stamp.tMonoNs, serving?.rsrp, serving?.sinr, lat?.first, lat?.second == false, sn.wifi?.rssiDbm, sn.rat, sn.usedSats)
+                    track += TrackPoint(f.lat, f.lon, f.stamp.tMonoNs, serving?.rsrp, serving?.sinr, lat?.first, lat?.second == false, sn.wifi?.rssiDbm, sn.rat, sn.usedSats)
                     if (track.size > maxTrack) { // halve resolution, keep endpoints
                         val keep = track.filterIndexed { i, _ -> i % 2 == 0 || i == track.lastIndex }
                         track.clear(); track.addAll(keep)
                     }
                     sn = sn.copy(track = track.toList())
                 }
+            }
+            is MotionSample -> {
+                still = when (s.activity) { "still", "tilting" -> true; null, "unknown" -> still; else -> false }
             }
             is GnssSatelliteSample -> {
                 if (s.stamp.tMonoNs != pendingSatStamp) {

@@ -172,7 +172,7 @@ private fun DeviceRow(row: CompanionRow, onOpenRun: (String) -> Unit) {
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                if (row.live && gap != null) "$gap ms" else "—",
+                if (row.live && gap != null) "$gap ms" else "–",
                 style = TType.body.copy(fontWeight = FontWeight.Bold).merge(TType.num), color = tc.text,
             )
             Spacer(Modifier.height(6.dp))

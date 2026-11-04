@@ -49,7 +49,7 @@ class SettingsViewModel @Inject constructor(
 
     val versionName: String = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
-    }.getOrNull() ?: "—"
+    }.getOrNull() ?: "–"
 
     fun update(transform: (RunSettings) -> RunSettings) {
         viewModelScope.launch { repository.update(transform) }

@@ -168,7 +168,7 @@ private fun ServingCard(anchor: CellSample, others: List<CellSample>) {
                 others.forEach { c ->
                     val leg = if (c.rat == "NR") stringResource(R.string.live_cells_nr_leg) else stringResource(R.string.live_cells_scell, c.rat)
                     Text(
-                        "$leg · ${c.band ?: Fmt.DASH} · ${Fmt.int(c.earfcnOrArfcn)} — PCI ${Fmt.int(c.pci)} · " +
+                        "$leg · ${c.band ?: Fmt.DASH} · ${Fmt.int(c.earfcnOrArfcn)} · PCI ${Fmt.int(c.pci)} · " +
                             "${if (c.rat == "NR") "SS-RSRP" else "RSRP"} ${Fmt.int(c.rsrp)} · SINR ${Fmt.int(c.sinr)}",
                         style = Mono.small, color = onC,
                     )

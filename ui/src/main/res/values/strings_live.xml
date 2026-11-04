@@ -116,7 +116,7 @@
     <string name="live_gnss_cn0">C/N0 per satellite (dB-Hz)</string>
     <string name="live_gnss_none">No satellites in view</string>
     <string name="live_gnss_used">used</string>
-    <string name="live_gnss_not_used">—</string>
+    <string name="live_gnss_not_used">–</string>
 
     <!-- event types -->
     <string name="live_ev_handover">Handover</string>

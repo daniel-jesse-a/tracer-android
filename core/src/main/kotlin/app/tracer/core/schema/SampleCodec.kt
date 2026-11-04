@@ -14,7 +14,7 @@ object SampleCodec {
     fun encode(s: Sample): List<Any?> {
         val head = listOf<Any?>(s.runId, s.stamp.tUtcMs, s.stamp.tMonoNs)
         val body: List<Any?> = when (s) {
-            is LocationSample -> listOf(s.lat, s.lon, s.altM, s.hAccM, s.vAccM, s.speedMps, s.speedAcc, s.courseDeg, s.courseAcc, l(s.floor), s.gpsTimeMs ?: s.stamp.gpsTimeMs, s.provider)
+            is LocationSample -> listOf(s.lat, s.lon, s.altM, s.hAccM, s.vAccM, s.speedMps, s.speedAcc, s.courseDeg, s.courseAcc, l(s.floor), s.gpsTimeMs ?: s.stamp.gpsTimeMs, s.provider, b(s.isMock))
             is MotionSample -> listOf(s.activity, l(s.confidence), s.pressureKpa, s.relAltM, s.accelMean, s.accelMax)
             is NetworkPathSample -> listOf(s.status, s.interfaces, s.primaryInterface, b(s.isExpensive), b(s.isConstrained), s.ipv4, s.ipv6, s.linkQuality, s.unsatisfiedReason)
             is RadioSample -> listOf(s.serviceId, s.rat, s.nrState, s.carrierAggregation)
@@ -23,7 +23,8 @@ object SampleCodec {
             is WifiScanSample -> listOf(s.scanId, s.ssid, s.bssid, s.rssiDbm.toLong(), s.frequencyMhz.toLong(), s.channelWidth, s.standard, s.capabilities, s.features)
             is GnssSatelliteSample -> listOf(s.svid.toLong(), s.constellation, s.cn0DbHz, s.elevation, s.azimuth, b(s.usedInFix), s.carrierFreqHz)
             is ProbeSample -> listOf(s.probeType, s.endpoint, b(s.success), s.error, s.dnsMs, s.connectMs, s.tlsMs, s.ttfbMs, s.totalMs, s.bytes, s.mbps, s.iface, b(s.isCellular), s.publicIp, s.asn, s.asnOrg,
-                l(s.httpStatus), l(s.redirectCount), s.finalUrl, b(s.expectedResponse))
+                l(s.httpStatus), l(s.redirectCount), s.finalUrl, b(s.expectedResponse),
+                s.remoteIp, l(s.ipVersion), s.edgePop, s.edgeHeaders, s.tlsCertSha256)
             is DeviceSample -> listOf(s.battery, b(s.charging), b(s.lowPower), s.thermalState)
             is EventSample -> listOf(s.eventType, s.severity, s.beforeJson, s.afterJson, s.lat, s.lon, s.likelyCause, s.causeConfidence, s.evidenceJson)
             is AnnotationSample -> listOf(s.text, s.audioPath)
@@ -39,6 +40,7 @@ object SampleCodec {
             is WifiRttSample -> listOf(s.bssid, s.status.toLong(), l(s.distanceMm), l(s.distanceStdDevMm), l(s.rssiDbm), l(s.attempted), l(s.successful))
             is EventLabelSample -> listOf(s.eventId, s.label)
             is GapSample -> listOf(s.startUtcMs, s.endUtcMs, s.reason)
+            is IntegritySample -> listOf(s.stamp.gpsTimeMs, s.kind, s.path, s.target, b(s.ok), s.value, s.detailJson)
         }
         return head + body
     }
@@ -98,10 +100,11 @@ object SampleCodec {
     fun decode(table: Table, row: Row): Sample {
         val run = row.str("run_id")!!
         val st = Stamp(row.long("t_utc_ms") ?: 0, row.long("t_mono_ns") ?: 0,
-            if (table == Table.LOCATION) row.long("gps_time_ms") else null)
+            if (table == Table.LOCATION || table == Table.INTEGRITY) row.long("gps_time_ms") else null)
         return when (table) {
             Table.LOCATION -> LocationSample(run, st, row.dbl("lat")!!, row.dbl("lon")!!, row.dbl("alt_m"), row.dbl("h_acc_m"), row.dbl("v_acc_m"),
-                row.dbl("speed_mps"), row.dbl("speed_acc"), row.dbl("course_deg"), row.dbl("course_acc"), row.int("floor"), row.long("gps_time_ms"), row.str("provider") ?: "unknown")
+                row.dbl("speed_mps"), row.dbl("speed_acc"), row.dbl("course_deg"), row.dbl("course_acc"), row.int("floor"), row.long("gps_time_ms"), row.str("provider") ?: "unknown",
+                row.bool("is_mock"))
             Table.MOTION -> MotionSample(run, st, row.str("activity"), row.int("confidence"), row.dbl("pressure_kpa"), row.dbl("rel_alt_m"), row.dbl("accel_mean"), row.dbl("accel_max"))
             Table.NETWORK_PATH -> NetworkPathSample(run, st, row.str("status") ?: "unsatisfied", row.str("interfaces"), row.str("primary_interface"),
                 row.bool("is_expensive"), row.bool("is_constrained"), row.str("ipv4"), row.str("ipv6"), row.str("link_quality"), row.str("unsatisfied_reason"))
@@ -119,7 +122,8 @@ object SampleCodec {
             Table.PROBE -> ProbeSample(run, st, row.str("probe_type") ?: "", row.str("endpoint") ?: "", row.bool("success") ?: false, row.str("error"),
                 row.dbl("dns_ms"), row.dbl("connect_ms"), row.dbl("tls_ms"), row.dbl("ttfb_ms"), row.dbl("total_ms"), row.long("bytes"), row.dbl("mbps"),
                 normalizeIface(row.str("interface"), row.bool("is_cellular")), row.bool("is_cellular"), row.str("public_ip"), row.str("asn"), row.str("asn_org"),
-                row.int("http_status"), row.int("redirect_count"), row.str("final_url"), row.bool("expected_response"))
+                row.int("http_status"), row.int("redirect_count"), row.str("final_url"), row.bool("expected_response"),
+                row.str("remote_ip"), row.int("ip_version"), row.str("edge_pop"), row.str("edge_headers"), row.str("tls_cert_sha256"))
             Table.DEVICE -> DeviceSample(run, st, row.dbl("battery"), row.bool("charging"), row.bool("low_power"), row.str("thermal_state"))
             Table.EVENT -> EventSample(run, st, row.str("event_type") ?: "", row.str("severity") ?: "info", row.str("before_json"), row.str("after_json"),
                 row.dbl("lat"), row.dbl("lon"), row.str("likely_cause"), row.dbl("cause_confidence"), row.str("evidence_json"))
@@ -141,6 +145,8 @@ object SampleCodec {
             Table.X_ANDROID_CARRIER -> CarrierSample(run, st, row.str("service_id") ?: "", row.int("idx") ?: 0, row.str("rat") ?: "UNKNOWN", row.str("band"),
                 row.int("arfcn"), row.int("pci"), row.dbl("bandwidth_mhz"), row.bool("is_primary") ?: false, row.str("source") ?: "")
             Table.X_COLLECTOR_LOG -> CollectorLogSample(run, st, row.str("collector") ?: "", row.str("health") ?: "", row.str("message"), row.int("restarts"))
+            Table.INTEGRITY -> IntegritySample(run, st, row.str("kind") ?: "", row.str("path"), row.str("target") ?: "", row.bool("ok"),
+                row.str("value"), row.str("detail_json"))
             Table.RUNS -> error("runs is decoded with decodeRun")
         }
     }

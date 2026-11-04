@@ -82,7 +82,7 @@ class MomentViewModel @Inject constructor(
         viewModelScope.launch {
             _saving.value = true
             _error.value = null
-            runCatching { reports.setFeedback(id, eventId, label) }.onFailure { _error.value = "Couldn't save — try again" }
+            runCatching { reports.setFeedback(id, eventId, label) }.onFailure { _error.value = "Couldn't save. Try again." }
             _saving.value = false
         }
     }
@@ -197,7 +197,7 @@ private fun CarrierTile(label: String, c: Carrier?, v: Verdict, modifier: Modifi
     Column(modifier.clip(RoundedCornerShape(K.tileRadius)).background(tc.bgOf(v)).padding(horizontal = 18.dp, vertical = 16.dp)) {
         Text(label, style = TType.sub.copy(fontSize = 16.sp), color = tc.text2)
         Spacer(Modifier.height(2.dp))
-        Text(c?.label ?: "—", style = TType.title.copy(fontSize = 28.sp), color = if (c != null) tc.of(c) else tc.text3)
+        Text(c?.label ?: "–", style = TType.title.copy(fontSize = 28.sp), color = if (c != null) tc.of(c) else tc.text3)
         Spacer(Modifier.height(2.dp))
         Text(v.label, style = TType.headline.copy(fontSize = 19.sp), color = tc.fg(v))
     }
@@ -275,7 +275,7 @@ private fun FeedbackBar(m: Moment, saving: Boolean, error: String?, onYes: (Long
     val message = when {
         eventId == null -> "Feedback isn't available for this moment"
         error != null -> error
-        fb == Feedback.YES -> "Thanks — marked correct"
+        fb == Feedback.YES -> "Thanks, marked correct"
         fb != null && Feedback.isNo(fb) -> Feedback.corrected(fb)?.let { "Changed to ${Plain.causeTitle(it)}" } ?: "Marked as wrong"
         else -> "Is this right?"
     }

@@ -42,7 +42,7 @@
     <string name="perm_location">Precise location</string>
     <string name="perm_location_why">Positions every sample on the map. Android also requires it to read cell info and Wi-Fi scan results.</string>
     <string name="perm_background">Location · Allow all the time</string>
-    <string name="perm_background_why">Keeps recording when the screen is off or another app is open. Android opens its settings page — choose “Allow all the time”, then come back.</string>
+    <string name="perm_background_why">Keeps recording when the screen is off or another app is open. Android opens its settings page: choose “Allow all the time”, then come back.</string>
     <string name="perm_phone">Phone state</string>
     <string name="perm_phone_why">Reads active SIMs, 5G NR state and per-SIM radio technology. No calls or call logs are accessed.</string>
     <string name="perm_nearby_wifi">Nearby Wi-Fi devices</string>
@@ -144,8 +144,8 @@
     <string name="library_yesterday">Yesterday %1$s</string>
     <string name="library_linked_iphone">iPhone</string>
     <string name="library_linked_android">Android</string>
-    <string name="library_recording_open">Recording — open Live</string>
-    <string name="library_paused_open">Paused — open Live</string>
+    <string name="library_recording_open">Recording · open Live</string>
+    <string name="library_paused_open">Paused · open Live</string>
     <string name="library_retention_deleted">Removed %1$d run(s) older than %2$d days</string>
     <string name="library_export_failed">Export failed: %1$s</string>
     <string name="library_share_failed">Could not share the bundle</string>
@@ -159,7 +159,7 @@
     <string name="companion_qr_hint">Scan with Tracer on the iPhone to link both runs.</string>
     <string name="companion_qr_after_start">The pairing QR for this phone appears once a run is recording.</string>
     <string name="companion_partner">iPhone</string>
-    <string name="companion_start_on_iphone">Start on iPhone too? Start a run in Tracer on the iPhone, then scan its QR here — it is linked to this phone’s run when recording starts.</string>
+    <string name="companion_start_on_iphone">Start on iPhone too? Start a run in Tracer on the iPhone, then scan its QR here. It is linked to this phone’s run when recording starts.</string>
     <string name="companion_scan">Scan iPhone QR</string>
     <string name="companion_invalid_qr">That QR code is not a Tracer pairing code.</string>
     <string name="companion_link_pending">will be linked when the run starts</string>
@@ -205,7 +205,7 @@
     <string name="settings_paths_cellular">Cellular</string>
     <string name="settings_paths_default_desc">Probes run on the default network only.</string>
     <string name="settings_paths_dual_desc">Default network plus mobile data in parallel while on Wi-Fi (uses some mobile data).</string>
-    <string name="settings_paths_wifi_desc">Wi-Fi only — probes never fall back to mobile data.</string>
+    <string name="settings_paths_wifi_desc">Wi-Fi only. Probes never fall back to mobile data.</string>
     <string name="settings_paths_cellular_desc">Mobile data only, even while Wi-Fi is connected.</string>
     <string name="settings_cellular_budget">Mobile-data budget per run</string>
     <string name="settings_internal_probes">Internal probes</string>

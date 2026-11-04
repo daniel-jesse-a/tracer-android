@@ -32,7 +32,10 @@ import javax.inject.Inject
  * [wifi_scan] — periodic WifiManager.startScan(); every fresh result set (including scans
  * triggered by other apps) becomes WifiScanSample rows sharing one Stamp, scanId = stamp.tUtcMs.
  * features = 11k/11v/11r from the AP's information elements (see [scanFeatures]).
- * Two consecutive failed scans mark the collector degraded and set [WifiScanCache.throttled].
+ * Throttling: WifiManager.isScanThrottleEnabled (API 30+) is read at start; when on, the collector
+ * is degraded immediately with [FixAction.DEVELOPER_OPTIONS] ([THROTTLE_SETTING_MESSAGE]) and stays
+ * so for the run. Independently, two consecutive failed scans mark the collector degraded and set
+ * [WifiScanCache.throttled].
  */
 class WifiScanCollector @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -61,16 +64,24 @@ class WifiScanCollector @Inject constructor(
         val worker = Worker(id)
         val failures = AtomicInteger(0)
         val awaitingResult = AtomicBoolean(false)
+        // Developer option "Wi-Fi scan throttling" (on by default): 4 scans / 2 min for foreground apps.
+        val throttleSetting = frameworkCall { wifi.isScanThrottleEnabled } == true
+        if (throttleSetting) {
+            scanCache.throttled = true
+            ctx.status.degraded(id, THROTTLE_SETTING_MESSAGE, FixAction.DEVELOPER_OPTIONS)
+        }
 
         fun onFailure() {
             if (failures.incrementAndGet() >= 2) {
                 scanCache.throttled = true
-                ctx.status.degraded(id, THROTTLED_MESSAGE, FixAction.DEVELOPER_OPTIONS)
+                ctx.status.degraded(id, if (throttleSetting) THROTTLE_SETTING_MESSAGE else THROTTLED_MESSAGE, FixAction.DEVELOPER_OPTIONS)
             }
         }
 
         fun onSuccess() {
             failures.set(0)
+            // With the throttle setting on, a successful scan does not clear the banner: later ones will be refused.
+            if (throttleSetting) return
             if (scanCache.throttled == true) ctx.status.ok(id)
             scanCache.throttled = false
         }
@@ -154,6 +165,8 @@ class WifiScanCollector @Inject constructor(
         }
 
     companion object {
+        const val THROTTLE_SETTING_MESSAGE =
+            "Wi-Fi scans are limited by Android. Turn off Developer options › Wi-Fi scan throttling."
         const val THROTTLED_MESSAGE =
             "Wi-Fi scans are being throttled. Turn off Developer options › Wi-Fi scan throttling for 30 s scans."
     }

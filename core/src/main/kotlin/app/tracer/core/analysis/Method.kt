@@ -27,6 +27,8 @@ object Method {
         put("throughput_interval_ms", settings.throughputIntervalMs)
         put("internal_probes", settings.internalProbes)
         put("battery_saver", settings.batterySaver)
+        // the cause-evidence window actually applied (± seconds around each event)
+        put("cause_window_s", settings.thresholds.causeWindowMs / 1000.0)
         // thresholds: keys sorted so field order never changes the hash
         putJsonObject("thresholds") { settings.thresholds.toJson().entries.sortedBy { it.key }.forEach { (k, v) -> put(k, v) } }
     }
@@ -68,9 +70,9 @@ data class Protocol(
             Protocol("walk10-dual", "Walk 10 min · dual path", 600, ProbePaths.DUAL,
                 "Wi-Fi (default) and mobile data probed in parallel. The standard comparison walk."),
             Protocol("walk10-wifi", "Walk 10 min · Wi-Fi only", 600, ProbePaths.WIFI_ONLY,
-                "Probes only on the Wi-Fi network — isolates Wi-Fi coverage/roaming."),
+                "Probes only on the Wi-Fi network. Isolates Wi-Fi coverage and roaming."),
             Protocol("walk10-cell", "Walk 10 min · cellular only", 600, ProbePaths.CELLULAR_ONLY,
-                "Probes only on mobile data, even with Wi-Fi connected — isolates the radio network."),
+                "Probes only on mobile data, even with Wi-Fi connected. Isolates the radio network."),
             Protocol("drive30-dual", "Drive 30 min · dual path", 1_800, ProbePaths.DUAL, "Longer route; same method as walk10-dual."),
             Protocol("soak120-dual", "Soak 2 h · dual path", 7_200, ProbePaths.DUAL,
                 "Long static/rail soak. Mobile-data budget applies (500 MB)."),

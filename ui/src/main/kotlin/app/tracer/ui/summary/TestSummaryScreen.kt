@@ -52,6 +52,31 @@ fun TestSummaryScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val delivery by vm.delivery.collectAsStateWithLifecycle()
     val email by vm.email.collectAsStateWithLifecycle()
+    val ask by vm.askEmail.collectAsStateWithLifecycle()
+    ask?.let { to ->
+        var never by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.declineEmail(false) },
+            containerColor = tc.card,
+            title = { Text("Email this test?", style = TType.title, color = tc.text) },
+            text = {
+                Column {
+                    Text("Send the PDF report, summary and full data to ${to.joinToString(" and ")}. A copy is also saved in Downloads/Tracer.",
+                        style = TType.sub, color = tc.text2)
+                    Row(Modifier.padding(top = 14.dp).clickable { never = !never }, verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = never, onCheckedChange = { never = it })
+                        Text("Don't ask after every test", style = TType.sub, color = tc.text2)
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.confirmEmail() }) { Text("Email", style = TType.label, color = tc.link) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.declineEmail(never) }) { Text("Not now", style = TType.label, color = tc.text3) }
+            },
+        )
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(email) {
         val intent = email ?: return@LaunchedEffect
@@ -81,7 +106,7 @@ private fun ColumnScope.SummaryBody(
                 Ring(
                     fraction = ((pct ?: 0.0) / 100.0).toFloat(),
                     color = if (pct == null) tc.text4 else tc.fg(r.onlineVerdict),
-                    center = pct?.let { "${it.roundToInt()}%" } ?: "—",
+                    center = pct?.let { "${it.roundToInt()}%" } ?: "–",
                     under = "online",
                 )
                 Spacer(Modifier.width(20.dp))
@@ -97,13 +122,15 @@ private fun ColumnScope.SummaryBody(
         // ---- 2×2 tiles
         TileRow {
             val ws = r.wifiSpeedMedian ?: r.wifiSpeedMax
-            VerdictTile("Wi-Fi speed", ws?.let { "${it.roundToInt()}" } ?: "—", r.wifiSpeedVerdict, Modifier.weight(1f), unit = ws?.let { "Mbps" })
+            VerdictTile("Wi-Fi speed", if (!r.wifiTested) "–" else ws?.let { "${it.roundToInt()}" } ?: "–", if (r.wifiTested) r.wifiSpeedVerdict else Verdict.NONE,
+                Modifier.weight(1f), unit = ws?.takeIf { r.wifiTested }?.let { "Mbps" }, verdictText = if (r.wifiTested) r.wifiSpeedVerdict.label else "Not tested")
             val ms = r.mobileSpeedMedian ?: r.mobileSpeedMax
-            VerdictTile("Mobile speed", ms?.let { "${it.roundToInt()}" } ?: "—", r.mobileSpeedVerdict, Modifier.weight(1f), unit = ms?.let { "Mbps" })
+            VerdictTile("Mobile speed", if (!r.mobileTested) "–" else ms?.let { "${it.roundToInt()}" } ?: "–", if (r.mobileTested) r.mobileSpeedVerdict else Verdict.NONE,
+                Modifier.weight(1f), unit = ms?.takeIf { r.mobileTested }?.let { "Mbps" }, verdictText = if (r.mobileTested) r.mobileSpeedVerdict.label else "Not tested")
         }
         TileRow {
             val rt = r.responseMs
-            VerdictTile("Response", rt?.let { "≤${it.roundToInt()}" } ?: "—", r.responseVerdict, Modifier.weight(1f), unit = rt?.let { "ms" })
+            VerdictTile("Response", rt?.let { "≤${it.roundToInt()}" } ?: "–", r.responseVerdict, Modifier.weight(1f), unit = rt?.let { "ms" })
             VerdictTile("Stability", "${r.switches}", r.stabilityVerdict, Modifier.weight(1f), unit = if (r.switches == 1) "switch" else "switches")
         }
         Spacer(Modifier.height(10.dp))
@@ -122,7 +149,7 @@ private fun ColumnScope.SummaryBody(
 
         // ---- moments
         if (r.moments.isEmpty()) {
-            Card { Text("No moments — nothing unusual happened.", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3) }
+            Card { Text("No moments. Nothing unusual happened.", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3) }
         } else {
             GroupCard(rows = r.moments.mapIndexed<Moment, @Composable () -> Unit> { i, m -> { MomentRow(m) { onMoment(i) } } }, inset = 18.dp)
         }
@@ -136,12 +163,22 @@ private fun ColumnScope.SummaryBody(
             }
             Spacer(Modifier.height(8.dp))
             val checks = r.checksPassedPct
-            ProgressLine("Checks passed", checks?.let { "${it.roundToInt()}%" } ?: "—",
+            ProgressLine("Checks passed", checks?.let { "${it.roundToInt()}%" } ?: "–",
                 ((checks ?: 0.0) / 100).toFloat(), tc.fg(Verdict.checks(checks)))
             val posFrac = positionsFraction(r)
             ProgressLine("Positions", "${r.positions}", posFrac.toFloat(), tc.fg(Verdict.checks(posFrac * 100)))
             val sched = r.onSchedulePct
             if (sched != null) ProgressLine("On schedule", "${sched.roundToInt()}%", (sched / 100).toFloat(), tc.fg(Verdict.checks(sched)))
+            val cov = r.coveragePct
+            if (cov != null) ProgressLine(
+                "Recorded" + if (r.gaps > 0) " · ${r.gaps} ${if (r.gaps == 1) "gap" else "gaps"}, longest ${fmtDuration(r.longestGapS)}" else "",
+                "${cov.roundToInt()}%", (cov / 100).toFloat(), tc.fg(Verdict.checks(cov)),
+            )
+            val notes = listOfNotNull(
+                r.movementNote,
+                if (r.shortTest) "Under 5 minutes: left out of comparisons" else null,
+            )
+            notes.forEach { Text(it, style = TType.footnote.copy(fontSize = 14.sp), color = tc.text3, modifier = Modifier.padding(top = 6.dp)) }
         }
         Spacer(Modifier.height(20.dp))
         Pill("Full diagnostics", onDiagnostics, Modifier.fillMaxWidth())

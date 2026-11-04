@@ -192,3 +192,13 @@ fun mloFrequencyMhz(band: Int, channel: Int): Int? = when (band) {
 fun mloBandName(band: Int): String? = when (band) {
     1 -> "2.4"; 2 -> "5"; 8 -> "6"; 16 -> "60"; else -> null
 }
+
+/**
+ * Speed to record, or null: dropped when absent or when its 1-sigma accuracy is ≥ the speed itself
+ * (e.g. 0.4 ± 0.9 m/s while standing still is noise, not motion). No accuracy = keep as reported.
+ */
+fun speedOrNull(speedMps: Double?, speedAccuracyMps: Double?): Double? = when {
+    speedMps == null || speedMps.isNaN() -> null
+    speedAccuracyMps != null && speedAccuracyMps >= speedMps -> null
+    else -> speedMps
+}

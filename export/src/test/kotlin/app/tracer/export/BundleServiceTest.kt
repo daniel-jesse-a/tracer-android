@@ -124,6 +124,36 @@ class BundleServiceTest {
         }
     }
 
+    /** v3 rows (integrity, probe edge columns, location.is_mock) survive live DB → run.sqlite → CSV → import; run.json reports coverage. */
+    @Test fun exportsV3RowsAndCoverage() = runBlocking<Unit> {
+        val sim = SyntheticRun()
+        repo.createRun(
+            RunRecord(runId, "Office · T4 · x", "walk", "android", "Pixel 9", "16", "1.0.0", sim.startUtcMs, sim.startUtcMs + 120_000L,
+                tMonoNs = sim.startMonoNs, site = "Office", testNumber = 4, timeZone = "Asia/Dubai", completenessJson = "{\"overall\":1.0}"),
+        )
+        // 120 s of samples with a 40 s hole (50–90 s) and no x_gap row
+        val base = sim.build(120) { if (t !in 50 until 90) { location(); latency(30.0) } }
+        val st = app.tracer.core.model.Stamp(sim.startUtcMs + 10_000, sim.startMonoNs + 10_000_000_000)
+        val integrity = app.tracer.core.model.IntegritySample(runId, st, "tls_cert", "cellular", "cp.cloudflare.com", true, "ab".repeat(32), "{\"issuer\":\"x\"}")
+        val probe = app.tracer.core.model.ProbeSample(runId, st, "latency", "https://cp.cloudflare.com/generate_204", true, totalMs = 30.0,
+            isCellular = true, iface = "cellular", remoteIp = "104.16.2.2", ipVersion = 4, edgePop = "DXB", edgeHeaders = "{\"cf-ray\":\"8a-DXB\"}", tlsCertSha256 = "ab".repeat(32))
+        val mock = app.tracer.core.model.LocationSample(runId, st.copy(gpsTimeMs = 9L), 25.0, 55.0, hAccM = 3.0, gpsTimeMs = 9L, provider = "gps", isMock = true)
+        (base + listOf(integrity, probe, mock)).forEach { writer.emit(it) }
+
+        val zip = service.export(runId) { }
+        val imported = zip.inputStream().use { Bundle.read(it) }
+        assertWithMessage(imported.integrity.toString()).that(imported.ok).isTrue()
+        assertThat(imported.samples[Table.INTEGRITY]).containsExactly(integrity)
+        assertThat(imported.samples[Table.PROBE]).contains(probe)
+        assertThat(imported.samples[Table.LOCATION]).contains(mock)
+        val m = imported.manifest
+        assertThat(m["schema_version"].toString()).isEqualTo("3")
+        val gaps = (m["coverage"] as kotlinx.serialization.json.JsonObject)["gaps"] as kotlinx.serialization.json.JsonObject
+        assertThat(gaps["count"].toString()).isEqualTo("1")
+        val entries = java.util.zip.ZipFile(zip).use { zf -> zf.entries().asSequence().map { it.name }.toSet() }
+        assertThat(entries).contains("integrity.csv")
+    }
+
     @Test fun bundleFileNames() {
         val base = RunRecord("1a2b3c4d-0000", "x", "walk", "android", "m", "16", "1", 1_760_000_000_000L, timeZone = "UTC")
         assertThat(BundleServiceImpl.bundleFileName(base)).isEqualTo("run_20251009-0853_1a2b3c4d.zip")

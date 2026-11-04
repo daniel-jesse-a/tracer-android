@@ -32,7 +32,9 @@ import javax.inject.Singleton
  * @param iface transport name for probe.interface: wifi | cellular | ethernet | vpn | other (never wlan0/rmnet1)
  * @param ifname kernel interface name (wlan0, rmnet1 …) — for `ping -I`; not persisted in probe rows
  */
-data class BoundNetwork(val network: Network, val iface: String, val isCellular: Boolean, val ifname: String? = null)
+data class BoundNetwork(val network: Network, val iface: String, val isCellular: Boolean, val ifname: String? = null) {
+    val isWifi: Boolean get() = iface == "wifi"
+}
 
 /** Transports a collector can hold a lease on (ConnectivityManager.requestNetwork). */
 enum class LeaseTransport(val androidTransport: Int, val iface: String) {
@@ -53,6 +55,13 @@ fun ProbePaths.forcedTransport(): LeaseTransport? = when (this) {
     ProbePaths.CELLULAR_ONLY -> LeaseTransport.CELLULAR
     else -> null
 }
+
+/**
+ * The success=false, error="no_network" rows for a probe that had no network to run on: one row, or
+ * none in WIFI_ONLY mode (Wi-Fi off / not connected is "Wi-Fi not tested", not a failed probe).
+ */
+fun noNetworkSamples(runId: String, stamp: Stamp, probeType: String, endpoint: String, paths: ProbePaths): List<ProbeSample> =
+    if (paths.emitsNoNetworkRows()) listOf(noNetworkSample(runId, stamp, probeType, endpoint, paths)) else emptyList()
 
 /**
  * A success=false, error="no_network" row for a probe that had no network to run on. In a forced-path
@@ -168,6 +177,20 @@ class ProbeNetworks @Inject constructor(
         while (leasedNetwork(transport) == null && SystemClock.elapsedRealtime() < deadline) delay(100L)
     }
 
+
+    /** true while [bound]'s network still exists (not lost / torn down). */
+    fun isUp(bound: BoundNetwork): Boolean = try {
+        cm?.getNetworkCapabilities(bound.network) != null
+    } catch (e: SecurityException) {
+        true
+    }
+
+    /**
+     * Whether a probe row measured on [bound] should be written: always for a success; a failure on a
+     * Wi-Fi path only while that Wi-Fi network still exists. A probe in flight when Wi-Fi is switched
+     * off / lost must not be written as a failed Wi-Fi probe (the report shows "Wi-Fi not tested").
+     */
+    fun keepRow(bound: BoundNetwork, success: Boolean): Boolean = success || !bound.isWifi || isUp(bound)
 
     private fun isTransport(network: Network, transport: LeaseTransport): Boolean =
         cm?.getNetworkCapabilities(network)?.hasTransport(transport.androidTransport) == true
@@ -289,4 +312,9 @@ internal fun HttpProbeResult.toProbeSample(
     redirectCount = if (success) redirectCount else null,
     finalUrl = if (success) finalUrl else null,
     expectedResponse = if (success) expected else false,
+    remoteIp = identity.remoteIp,
+    ipVersion = identity.ipVersion,
+    edgePop = identity.edgePop,
+    edgeHeaders = identity.edgeHeaders,
+    tlsCertSha256 = identity.tlsCertSha256,
 )

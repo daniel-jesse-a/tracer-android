@@ -7,7 +7,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /** Placeholder for a missing value — shared by every formatter. */
-const val NO_VALUE = "—"
+const val NO_VALUE = "–"
 
 /** 3 723 000 ms → "01:02:03"; ≥ 100 h keeps growing ("123:00:00"). Negative → 00:00:00. */
 fun formatDuration(ms: Long): String {

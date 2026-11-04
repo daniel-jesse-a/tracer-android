@@ -7,6 +7,7 @@ import app.tracer.core.model.DeviceSample
 import app.tracer.core.model.EventLabelSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.GapSample
+import app.tracer.core.model.IntegritySample
 import app.tracer.core.model.CollectorLogSample
 import app.tracer.core.model.CarrierSample
 import app.tracer.core.model.WifiRoamSample
@@ -54,4 +55,5 @@ fun Sample.withStamp(stamp: Stamp): Sample = when (this) {
     is WifiRoamSample -> copy(stamp = stamp)
     is CarrierSample -> copy(stamp = stamp)
     is CollectorLogSample -> copy(stamp = stamp)
+    is IntegritySample -> copy(stamp = stamp)
 }

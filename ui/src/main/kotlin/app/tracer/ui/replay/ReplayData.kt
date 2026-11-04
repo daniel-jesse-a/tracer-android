@@ -75,7 +75,7 @@ object ReplayBuilder {
     fun waypointSeqOf(markerId: Long): Int? = if (markerId < 0) (-markerId).toInt() else null
 
     /** "aa:bb:cc:dd:ee:ff" → "ee:ff" (enough to tell APs of one SSID apart). */
-    fun bssidTail(bssid: String?): String = bssid?.takeLast(5) ?: "—"
+    fun bssidTail(bssid: String?): String = bssid?.takeLast(5) ?: "–"
 
     /** TYPE: ConnType.of(rat, primaryInterface) at every change of either stream. */
     fun connType(radio: List<RadioSample>, paths: List<NetworkPathSample>): CatData {

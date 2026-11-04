@@ -144,7 +144,7 @@ fun SettingsScreen(
             Caption("Data & battery")
             Group {
                 val bytes = s?.throughputBytes
-                ListRow("Speed test size", bytes?.let { mb(it) } ?: "—", onClick = {
+                ListRow("Speed test size", bytes?.let { mb(it) } ?: "–", onClick = {
                     val cur = s ?: return@ListRow
                     val si = SPEED_SIZES_MB.indexOfFirst { it * 1_000_000L == cur.throughputBytes }
                     picker = PickerSpec("Speed test size", SPEED_SIZES_MB.map { "$it MB" }, si) { i ->
@@ -159,7 +159,7 @@ fun SettingsScreen(
 
             Caption("Email reports")
             Group {
-                ToggleRow("Email after each test", "Opens a ready-to-send email with the report when a test ends", autoEmail) { viewModel.setAutoEmail(it) }
+                ToggleRow("Offer email after each test", "Asks when a test ends, then opens a ready-to-send email", autoEmail) { viewModel.setAutoEmail(it) }
                 Sep()
                 ListRow("Recipients", if (recipients.size == 1) recipients[0] else "${recipients.size} people", onClick = {
                     text = TextSpec("Recipients (comma separated)", recipients.joinToString(", "), false) { v ->
@@ -179,7 +179,7 @@ fun SettingsScreen(
             Group {
                 ListRow("Engineer view", trailing = { Toggle(engineer) { viewModel.setEngineerView(it) } })
                 Sep()
-                ListRow("Check intervals", s?.let { ms(it.latencyIntervalMs) } ?: "—", onClick = {
+                ListRow("Check intervals", s?.let { ms(it.latencyIntervalMs) } ?: "–", onClick = {
                     val cur = s ?: return@ListRow
                     val ci = CHECK_INTERVALS_MS.indexOf(cur.latencyIntervalMs)
                     picker = PickerSpec("Check intervals", CHECK_INTERVALS_MS.map { ms(it) }, ci) { i ->
@@ -187,7 +187,7 @@ fun SettingsScreen(
                     }
                 })
                 Sep()
-                ListRow("Test servers", s?.endpoints?.size?.toString() ?: "—", onClick = { serversOpen = true })
+                ListRow("Test servers", s?.endpoints?.size?.toString() ?: "–", onClick = { serversOpen = true })
             }
 
             if (engineer && s != null) {
@@ -355,7 +355,7 @@ private fun mb(bytes: Long): String =
 private fun pathDesc(p: ProbePaths): String = when (p) {
     ProbePaths.DEFAULT -> "Probes run on the default network only."
     ProbePaths.DUAL -> "Default network plus mobile data in parallel while on Wi-Fi."
-    ProbePaths.WIFI_ONLY -> "Wi-Fi only — probes never fall back to mobile data."
+    ProbePaths.WIFI_ONLY -> "Wi-Fi only. Probes never fall back to mobile data."
     ProbePaths.CELLULAR_ONLY -> "Mobile data only, even while Wi-Fi is connected."
 }
 

@@ -41,9 +41,9 @@ class CaptiveProbeCollector @Inject constructor(
                     ctx.signals.awaitResumed()
                     val targets = networks.networksFor(paths)
                     val samples = if (targets.isEmpty()) {
-                        listOf(noNetworkSample(ctx.runId, ctx.clock.now(), "captive", ctx.settings.effective().captiveUrl, paths))
+                        noNetworkSamples(ctx.runId, ctx.clock.now(), "captive", ctx.settings.effective().captiveUrl, paths)
                     } else {
-                        targets.map { runOnce(ctx, it) }
+                        targets.map { it to runOnce(ctx, it) }.filter { (b, s) -> networks.keepRow(b, s.success) }.map { it.second }
                     }
                     for (sample in samples) {
                         send(sample)

@@ -8,6 +8,7 @@ import app.tracer.core.model.EventLabelSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.GapSample
 import app.tracer.core.model.CollectorLogSample
+import app.tracer.core.model.IntegritySample
 import app.tracer.core.model.CarrierSample
 import app.tracer.core.model.WifiRoamSample
 import app.tracer.core.model.WaypointSample
@@ -61,13 +62,14 @@ class SampleRestampTest {
         WifiRoamSample(r, st, "Office", "aa:aa:aa:aa:aa:01", "aa:aa:aa:aa:aa:02", "5", "2.4", -78, -60, 0, 42.0, 30.0, 72.0, true, true, false),
         CarrierSample(r, st, "2", 1, "NR", "n41", 522990, 960, 90.0, false, "bandwidth+cellinfo"),
         CollectorLogSample(r, st, "gnss", "degraded", "no sky", 0),
+        IntegritySample(r, st, "dns_doh", "wifi", "www.google.com", true, "system: a · doh: a", "{}"),
     )
 
     @Test
     fun coversEverySampleTypeAndTable() {
         val samples = everySubclass()
         // 19 concrete Sample classes exist; the exhaustive `when` in restamp() guarantees compile-time coverage.
-        assertEquals(23, samples.map { it::class }.toSet().size)
+        assertEquals(24, samples.map { it::class }.toSet().size)
         val tables = samples.map { it.table }.toSet() + Table.CELL_NEIGHBOUR // CellSample covers both
         assertEquals(Table.entries.toSet() - Table.RUNS, tables)
     }

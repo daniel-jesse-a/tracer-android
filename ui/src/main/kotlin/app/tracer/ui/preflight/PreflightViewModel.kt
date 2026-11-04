@@ -220,6 +220,9 @@ class PreflightViewModel @Inject constructor(
         return "≈ $mb MB mobile data" + if (setup.lengthMin == 0) " per 10 min" else ""
     }
 
+    /** Free runs still record their recipe as the protocol, e.g. "free:walk-dual-10m" (Protocol.byId → null, no fixed settings). */
+    private fun freeProtocolId(s: NewTestSetup): String = "free:${s.mode}-${s.networks}-${if (s.lengthMin > 0) "${s.lengthMin}m" else "open"}"
+
     /** Synchronous so it completes even though navigation clears this ViewModel right after. */
     fun start() {
         val s = _setup.value
@@ -228,7 +231,7 @@ class PreflightViewModel @Inject constructor(
         val name = context.getString(R.string.preflight_default_name, formatDateTime(System.currentTimeMillis()))
         val site = s.siteOrNull
         controller.start(
-            name, s.mode, runSettings(base, s), scenario, site = site, protocolId = null,
+            name, s.mode, runSettings(base, s), scenario, site = site, protocolId = freeProtocolId(s),
             durationLimitMs = if (s.lengthMin > 0) s.lengthMin * 60_000L else null,
         )
         // outlives this ViewModel (navigation clears it right after start)
@@ -311,7 +314,7 @@ class PreflightViewModel @Inject constructor(
         val pct = s.batteryPct
         rows += CheckRow(
             "Battery",
-            (pct?.let { "$it %" } ?: "—") + if (s.batteryExempt) "" else " · may be paused",
+            (pct?.let { "$it %" } ?: "–") + if (s.batteryExempt) "" else " · may be paused",
             if (s.batteryExempt && (pct ?: 100) > 20) CheckStatus.OK else CheckStatus.NOTE,
             FixAction.BATTERY, if (!s.batteryExempt) "battery" else "low battery",
         )

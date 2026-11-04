@@ -13,6 +13,7 @@ import app.tracer.core.runtime.Collector
 import app.tracer.core.runtime.FixAction
 import app.tracer.core.runtime.CollectorContext
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -28,6 +29,11 @@ import com.google.android.gms.location.LocationRequest as FusedLocationRequest
 /**
  * [location] — raw GNSS fixes from LocationManager.GPS_PROVIDER (provider "gps"), plus optional
  * FusedLocationProvider rows (provider "fused") when settings.useFusedComparison is on.
+ *
+ * Both requests: highest accuracy, settings.locationIntervalMs (1 s default), no distance filter
+ * (minUpdateDistanceMeters = 0), so a walker standing still still gets one fix per interval.
+ * Rows carry is_mock (Location.isMock) and drop speed when its 1-sigma accuracy is ≥ the speed
+ * itself (pure noise when stationary, see [speedOrNull]); the position fix is kept as reported.
  */
 class LocationCollector @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -72,6 +78,7 @@ class LocationCollector @Inject constructor(
         val request = PlatformLocationRequest.Builder(interval)
             .setQuality(PlatformLocationRequest.QUALITY_HIGH_ACCURACY)
             .setMinUpdateIntervalMillis(interval)
+            .setMinUpdateDistanceMeters(0f)
             .build()
         frameworkCall({ ctx.status.unavailable(id, "GPS updates refused: ${it.message}") }) {
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, request, worker.executor, gpsListener)
@@ -86,6 +93,9 @@ class LocationCollector @Inject constructor(
                 val client = LocationServices.getFusedLocationProviderClient(context)
                 val fusedRequest = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
                     .setMinUpdateIntervalMillis(interval)
+                    .setMinUpdateDistanceMeters(0f)
+                    .setGranularity(Granularity.GRANULARITY_FINE)
+                    .setWaitForAccurateLocation(false)
                     .build()
                 client.requestLocationUpdates(fusedRequest, worker.executor, fusedListener)
                     .addOnFailureListener { e -> ctx.status.degraded(id, "Fused location comparison unavailable: ${e.message}") }
@@ -103,19 +113,24 @@ class LocationCollector @Inject constructor(
         }
     }.buffer(256)
 
-    private fun Location.toSample(runId: String, stamp: Stamp, provider: String, gpsTime: Long?) = LocationSample(
-        runId = runId,
-        stamp = stamp,
-        lat = latitude,
-        lon = longitude,
-        altM = if (hasAltitude()) altitude else null,
-        hAccM = if (hasAccuracy()) accuracy.toDouble() else null,
-        vAccM = if (hasVerticalAccuracy()) verticalAccuracyMeters.toDouble() else null,
-        speedMps = if (hasSpeed()) speed.toDouble() else null,
-        speedAcc = if (hasSpeedAccuracy()) speedAccuracyMetersPerSecond.toDouble() else null,
-        courseDeg = if (hasBearing()) bearing.toDouble() else null,
-        courseAcc = if (hasBearingAccuracy()) bearingAccuracyDegrees.toDouble() else null,
-        gpsTimeMs = gpsTime,
-        provider = provider,
-    )
+    private fun Location.toSample(runId: String, stamp: Stamp, provider: String, gpsTime: Long?): LocationSample {
+        val speedAccuracy = if (hasSpeedAccuracy()) speedAccuracyMetersPerSecond.toDouble() else null
+        val keepSpeed = speedOrNull(if (hasSpeed()) speed.toDouble() else null, speedAccuracy) != null
+        return LocationSample(
+            runId = runId,
+            stamp = stamp,
+            lat = latitude,
+            lon = longitude,
+            altM = if (hasAltitude()) altitude else null,
+            hAccM = if (hasAccuracy()) accuracy.toDouble() else null,
+            vAccM = if (hasVerticalAccuracy()) verticalAccuracyMeters.toDouble() else null,
+            speedMps = if (keepSpeed) speed.toDouble() else null,
+            speedAcc = if (keepSpeed) speedAccuracy else null,
+            courseDeg = if (hasBearing()) bearing.toDouble() else null,
+            courseAcc = if (hasBearingAccuracy()) bearingAccuracyDegrees.toDouble() else null,
+            gpsTimeMs = gpsTime,
+            provider = provider,
+            isMock = isMock,
+        )
+    }
 }

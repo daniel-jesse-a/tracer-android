@@ -5,6 +5,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Connection
 import okhttp3.EventListener
 import okhttp3.Handshake
 import okhttp3.Interceptor
@@ -14,9 +15,14 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -30,6 +36,24 @@ data class Phases(
     /** Request headers sent → first response header byte. */
     val ttfbMs: Double? = null,
     val totalMs: Double? = null,
+)
+
+/**
+ * Which server answered: the remote address of the connection actually used, the edge headers on
+ * the response and the leaf certificate of the TLS handshake. All best-effort (null = unknown).
+ */
+data class ServerIdentity(
+    val remoteIp: String? = null,
+    /** 4 | 6 */
+    val ipVersion: Int? = null,
+    val edgePop: String? = null,
+    /** JSON object of the [EDGE_HEADER_KEYS] present on the response */
+    val edgeHeaders: String? = null,
+    /** SHA-256 (hex) of the DER-encoded leaf certificate */
+    val tlsCertSha256: String? = null,
+    val tlsIssuerCn: String? = null,
+    val tlsSubjectCn: String? = null,
+    val tlsNotAfterUtcMs: Long? = null,
 )
 
 /**
@@ -47,6 +71,9 @@ class PhaseTimingListener(private val nanoTime: () -> Long = System::nanoTime) :
     @Volatile private var requestHeadersEnd = -1L
     @Volatile private var responseHeadersStart = -1L
     @Volatile private var callEnd = -1L
+    /** Remote socket address: last connectEnd, overridden by the connection actually acquired. */
+    @Volatile private var remote: InetSocketAddress? = null
+    @Volatile private var handshake: Handshake? = null
 
     override fun callStart(call: Call) { callStart = nanoTime() }
     override fun dnsStart(call: Call, domainName: String) { dnsStart = nanoTime() }
@@ -55,12 +82,52 @@ class PhaseTimingListener(private val nanoTime: () -> Long = System::nanoTime) :
         connectStart = nanoTime(); secureStart = -1L; secureEnd = -1L; connectEnd = -1L
     }
     override fun secureConnectStart(call: Call) { secureStart = nanoTime() }
-    override fun secureConnectEnd(call: Call, handshake: Handshake?) { secureEnd = nanoTime() }
-    override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) { connectEnd = nanoTime() }
+    override fun secureConnectEnd(call: Call, handshake: Handshake?) {
+        secureEnd = nanoTime()
+        if (handshake != null) this.handshake = handshake
+    }
+    override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) {
+        connectEnd = nanoTime()
+        remote = inetSocketAddress
+    }
+    // The connection that serves the call (with OkHttp 5 fast fallback several connects may race;
+    // this is the winner). Does not touch any timing field.
+    override fun connectionAcquired(call: Call, connection: Connection) {
+        try {
+            remote = connection.route().socketAddress
+            connection.handshake()?.let { handshake = it }
+        } catch (e: RuntimeException) {
+            // identity is best-effort
+        }
+    }
     override fun requestHeadersEnd(call: Call, request: Request) { requestHeadersEnd = nanoTime() }
     override fun responseHeadersStart(call: Call) { responseHeadersStart = nanoTime() }
     override fun callEnd(call: Call) { callEnd = nanoTime() }
     override fun callFailed(call: Call, ioe: IOException) { callEnd = nanoTime() }
+
+    /** Remote address + TLS leaf of the connection used; edge headers are added from the response by the caller. */
+    fun identity(): ServerIdentity {
+        val addr = remote?.address
+        val ip = addr?.hostAddress?.let(::stripScope)
+        val leaf = try {
+            handshake?.peerCertificates?.firstOrNull() as? X509Certificate
+        } catch (e: Exception) { // SSLPeerUnverifiedException etc.
+            null
+        }
+        val sha = leaf?.let { c -> try { sha256Hex(c.encoded) } catch (e: Exception) { null } }
+        return ServerIdentity(
+            remoteIp = ip,
+            ipVersion = when (addr) {
+                is Inet6Address -> 6
+                is Inet4Address -> 4
+                else -> ipVersionOf(ip)
+            },
+            tlsCertSha256 = sha,
+            tlsIssuerCn = leaf?.let { commonName(it.issuerX500Principal?.name) },
+            tlsSubjectCn = leaf?.let { commonName(it.subjectX500Principal?.name) },
+            tlsNotAfterUtcMs = leaf?.notAfter?.time,
+        )
+    }
 
     /** Phases so far; [endNs] overrides the call end (e.g. when the body was read manually). */
     fun phases(endNs: Long? = null): Phases {
@@ -114,6 +181,8 @@ data class HttpProbeResult(
     val finalUrl: String? = null,
     /** Status at the end of the redirect chain (= [code] when nothing was followed; null if a follow-up failed). */
     val finalCode: Int? = null,
+    /** Server identity of the first (timed) hop. */
+    val identity: ServerIdentity = ServerIdentity(),
 )
 
 /** Executes probe requests with per-call phase timing and error classification. */
@@ -144,7 +213,7 @@ object HttpProbe {
         val response = try {
             timed.newCall(request).await()
         } catch (e: IOException) {
-            return HttpProbeResult(success = false, code = null, error = classifyError(e), phases = timer.phases(System.nanoTime()))
+            return HttpProbeResult(success = false, code = null, error = classifyError(e), phases = timer.phases(System.nanoTime()), identity = timer.identity())
         }
         val first = withContext(Dispatchers.IO) {
             response.use { r ->
@@ -179,6 +248,10 @@ object HttpProbe {
                     redirectCount = 0,
                     finalUrl = r.request.url.toString(),
                     finalCode = r.code,
+                    identity = timer.identity().copy(
+                        edgePop = edgePopFrom { name -> r.header(name) },
+                        edgeHeaders = edgeHeadersJson { name -> r.header(name) },
+                    ),
                 ) to r.header("Location")
             }
         }
@@ -232,6 +305,9 @@ object HttpProbe {
     /**
      * Reads and discards up to [capBytes] or until [maxTransferMs] after the first byte. A transport
      * failure mid-body keeps the bytes read so far (they count against the mobile-data budget).
+     * The time box is hard: an Okio deadline on the body source (headers received + maxTransferMs +
+     * [DEADLINE_GRACE_MS]) interrupts a read that blocks past it; hitting the box is a normal end,
+     * not an error. [Discarded.transferNs] is the real first→last byte time.
      */
     private fun discard(r: Response, capBytes: Long, maxTransferMs: Long): Discarded {
         // Typed as nullable so this compiles whether or not ResponseBody is platform-nullable.
@@ -241,23 +317,33 @@ object HttpProbe {
         var firstNs = 0L
         var lastNs = 0L
         var error: IOException? = null
-        val capNs = if (maxTransferMs == Long.MAX_VALUE) Long.MAX_VALUE else maxTransferMs * 1_000_000L
+        val boxed = maxTransferMs != Long.MAX_VALUE && maxTransferMs > 0
+        val capNs = if (boxed) maxTransferMs * 1_000_000L else Long.MAX_VALUE
+        val startNs = System.nanoTime()
         try {
-            val input = responseBody?.byteStream() ?: return Discarded(0L, null, null)
+            val source = responseBody?.source() ?: return Discarded(0L, null, null)
+            if (boxed) source.timeout().deadline(maxTransferMs + DEADLINE_GRACE_MS, TimeUnit.MILLISECONDS)
             while (total < capBytes) {
                 val want = minOf(buf.size.toLong(), capBytes - total).toInt()
-                val n = input.read(buf, 0, want)
+                val n = source.read(buf, 0, want)
                 if (n < 0) break
                 lastNs = System.nanoTime()
                 if (firstNs == 0L) firstNs = lastNs
                 total += n
                 if (lastNs - firstNs >= capNs) break
             }
+        } catch (e: InterruptedIOException) {
+            // The deadline fired: the time box ended the transfer (keep the bytes, no error). A read
+            // timeout well before the box is a real stall.
+            val ranMs = (System.nanoTime() - startNs) / 1_000_000L
+            if (!(boxed && ranMs >= maxTransferMs)) error = e
         } catch (e: IOException) {
             error = e
         }
         return Discarded(total, if (firstNs == 0L) null else (lastNs - firstNs).coerceAtLeast(1L), error)
     }
+
+    private const val DEADLINE_GRACE_MS = 1_000L
 }
 
 /** Suspends until the call returns a response; cancels the call on coroutine cancellation. */

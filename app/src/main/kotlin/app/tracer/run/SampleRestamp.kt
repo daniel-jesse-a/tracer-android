@@ -7,6 +7,7 @@ import app.tracer.core.model.DeviceSample
 import app.tracer.core.model.EventLabelSample
 import app.tracer.core.model.EventSample
 import app.tracer.core.model.GapSample
+import app.tracer.core.model.IntegritySample
 import app.tracer.core.model.CollectorLogSample
 import app.tracer.core.model.CarrierSample
 import app.tracer.core.model.WifiRoamSample
@@ -60,5 +61,6 @@ fun Sample.restamp(runId: String, stamp: Stamp): Sample {
         is WifiRoamSample -> copy(runId = runId, stamp = stamp)
         is CarrierSample -> copy(runId = runId, stamp = stamp)
         is CollectorLogSample -> copy(runId = runId, stamp = stamp)
+        is IntegritySample -> copy(runId = runId, stamp = stamp)
     }
 }

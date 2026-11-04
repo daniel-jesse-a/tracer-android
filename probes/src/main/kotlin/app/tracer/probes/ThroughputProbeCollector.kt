@@ -32,8 +32,13 @@ import javax.inject.Inject
  * over cellular are counted per collection; once settings.cellularDataBudgetMb is reached, cellular
  * tests are skipped for the rest of the run (latency/internal probes continue).
  *
+ * Time box: the body is read until settings.throughputBytes or settings.throughputMaxMs after the
+ * first byte, whichever comes first (hard Okio deadline, see [HttpProbe]); bytes = bytes actually
+ * received, mbps = bytes / real first→last byte time. On cellular the request asks for no more
+ * than the budget left, so a test never overshoots the budget by more than in-flight data.
+ *
  * success = reachable (HTTP response received); expected_response = 2xx at the end of the chain;
- * mbps only for a 2xx first hop.
+ * mbps only for a 2xx first hop. WIFI_ONLY with Wi-Fi off writes nothing.
  */
 class ThroughputProbeCollector @Inject constructor(
     private val networks: ProbeNetworks,
@@ -58,18 +63,21 @@ class ThroughputProbeCollector @Inject constructor(
 
         /** false (and reports degraded once) when the mobile-data budget is used up. */
         fun cellularAllowed(): Boolean {
-            if (cellularBytes < budget) return true
+            if (budget - cellularBytes >= MIN_TEST_BYTES) return true
             if (!budgetReported) {
                 budgetReported = true
-                ctx.status.degraded(id, "Mobile-data budget of ${settings.cellularDataBudgetMb} MB reached — cellular throughput tests paused (latency continues).")
+                ctx.status.degraded(id, "Mobile-data budget of ${settings.cellularDataBudgetMb} MB reached. Cellular throughput tests paused, latency continues.")
             }
             return false
         }
 
         suspend fun test(bound: BoundNetwork?): ProbeSample? {
+            if (bound == null && !paths.emitsNoNetworkRows()) return null
             if (bound?.isCellular == true && !cellularAllowed()) return null
-            val sample = runOnce(ctx, bound, paths)
+            val cap = if (bound?.isCellular == true) minOf(settings.throughputBytes, budget - cellularBytes) else settings.throughputBytes
+            val sample = runOnce(ctx, bound, paths, cap)
             if (bound?.isCellular == true) cellularBytes += sample.bytes ?: 0L
+            if (bound != null && !networks.keepRow(bound, sample.success)) return null
             return sample
         }
 
@@ -106,9 +114,9 @@ class ThroughputProbeCollector @Inject constructor(
         }
     }
 
-    private suspend fun runOnce(ctx: CollectorContext, network: BoundNetwork?, paths: ProbePaths): ProbeSample {
+    private suspend fun runOnce(ctx: CollectorContext, network: BoundNetwork?, paths: ProbePaths, capBytes: Long): ProbeSample {
         val settings = ctx.settings.effective()
-        val url = throughputUrl(settings.throughputUrl, settings.throughputBytes)
+        val url = throughputUrl(settings.throughputUrl, capBytes)
         val stamp = ctx.clock.now()
         val bound = network
             ?: return noNetworkSample(ctx.runId, stamp, "throughput", url, paths)
@@ -117,13 +125,13 @@ class ThroughputProbeCollector @Inject constructor(
         } catch (e: IllegalArgumentException) {
             return ProbeSample(ctx.runId, stamp, "throughput", url, success = false, error = "io", iface = bound.iface, isCellular = bound.isCellular, expectedResponse = false)
         }
-        // Connect phases use the probe timeout; the whole transfer may take up to TRANSFER_TIMEOUT_MS.
+        // Connect phases use the probe timeout; the whole call is bounded by setup + the time box.
         val timeout = settings.thresholds.probeTimeoutMs
-        val client = networks.client(baseClient, bound.network, TRANSFER_TIMEOUT_MS).newBuilder()
+        val client = networks.client(baseClient, bound.network, throughputCallTimeoutMs(timeout, settings.throughputMaxMs, TRANSFER_TIMEOUT_MS)).newBuilder()
             .connectTimeout(timeout, TimeUnit.MILLISECONDS)
             .readTimeout(timeout * 2, TimeUnit.MILLISECONDS)
             .build()
-        val r = HttpProbe.execute(client, request, BodyMode.Discard(capBytes = settings.throughputBytes, maxTransferMs = settings.throughputMaxMs))
+        val r = HttpProbe.execute(client, request, BodyMode.Discard(capBytes = capBytes, maxTransferMs = settings.throughputMaxMs))
         val bytes = r.bytes
         // Rate over the body transfer only (excludes DNS/TCP/TLS/TTFB), so short tests aren't dominated by setup.
         // Only a 2xx body is the test payload (a redirect/error page is not a throughput measurement).
@@ -139,5 +147,7 @@ class ThroughputProbeCollector @Inject constructor(
         const val TRANSFER_TIMEOUT_MS = 30_000L
         /** Parallel mobile-data throughput (DUAL, while on Wi-Fi) only every Nth cycle, to bound data use. */
         const val PARALLEL_CELLULAR_EVERY = 3
+        /** Below this much budget left a cellular test is not worth running (budget counts as reached). */
+        const val MIN_TEST_BYTES = 1_000_000L
     }
 }

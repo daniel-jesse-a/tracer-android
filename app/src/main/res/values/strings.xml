@@ -8,7 +8,7 @@
     <string name="channel_alerts">Alerts</string>
     <string name="channel_alerts_desc">Run stopped or interrupted</string>
 
-    <string name="notif_dash">—</string>
+    <string name="notif_dash">–</string>
     <!-- transport · RAT · RSRP · latency · event count -->
     <string name="notif_text">%1$s · %2$s · RSRP %3$s dBm · %4$s ms · %5$d events</string>
     <!-- protocol id · time left, e.g. "Protocol walk10-dual · 06:12 left" -->
@@ -22,6 +22,6 @@
     <string name="alert_storage_low">Run stopped: free storage fell below the configured minimum.</string>
     <string name="alert_permission_revoked">Run stopped: location permission was revoked.</string>
     <string name="alert_start_failed">Could not start the run. Check that location permission is granted.</string>
-    <string name="annotation_low_battery">Battery %1$d %% — battery-saver intervals enabled automatically</string>
+    <string name="annotation_low_battery">Battery %1$d %%: battery-saver intervals enabled automatically</string>
     <string name="alert_interrupted">Recording was interrupted. Open Tracer to resume the run.</string>
 </resources>

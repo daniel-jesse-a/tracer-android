@@ -146,7 +146,10 @@ class RunService : LifecycleService() {
         var simJob: Job? = null
         var simSamples: List<Sample>? = null
         @Volatile var simIndex = 0
-        var state = RunState.RECORDING
+        /** Whole-process stalls (Doze / OEM freeze) while recording; guarded by sampleLock. */
+        val stalls = StallDetector()
+        /** Written on the main thread, read by [onSample] on Dispatchers.Default. */
+        @Volatile var state = RunState.RECORDING
         var pausedAtUtcMs = 0L
         var pausedAtMonoNs = 0L
         var pausedMsTotal = 0L
@@ -240,7 +243,7 @@ class RunService : LifecycleService() {
             facade.publishRunId(s.run.runId); facade.publishState(s.state); return
         }
         val protocol = Protocol.byId(protocolId)
-        if (protocolId != null && protocol == null) Log.w(TAG, "unknown protocol '$protocolId' — starting a free run")
+        if (protocolId != null && protocol == null) Log.w(TAG, "unknown protocol '$protocolId', starting a free run")
         val settings = protocol?.let { protocolSettings(it, userSettings) } ?: userSettings
         val now = clock.now()
         val zone = ZoneId.systemDefault()
@@ -390,7 +393,10 @@ class RunService : LifecycleService() {
         s.gapMsTotal += d
         s.state = RunState.RECORDING
         signals.paused.value = false
-        sampleLock.withLock { aggregator.setState(RunState.RECORDING) }
+        sampleLock.withLock {
+            s.stalls.reset(now.tUtcMs, now.tMonoNs)
+            aggregator.setState(RunState.RECORDING)
+        }
         onSample(s, GapSample(s.run.runId, now, s.pausedAtUtcMs, now.tUtcMs, "pause"))
         launchSources(s)
         facade.publishState(RunState.RECORDING)
@@ -519,6 +525,8 @@ class RunService : LifecycleService() {
         signals.degraded.value = false
         signals.paused.value = s.state == RunState.PAUSED
         sampleLock.withLock {
+            val now = clock.now()
+            s.stalls.reset(now.tUtcMs, now.tMonoNs)
             aggregator.reset(s.run.runId, s.state, s.startedMonoNs)
             facade.publishLive(aggregator.snapshot)
         }
@@ -617,19 +625,46 @@ class RunService : LifecycleService() {
     private suspend fun onSample(s: Session, sample: Sample) {
         sampleLock.withLock {
             if (session !== s) return
-            sink.emit(sample)
-            aggregator.onSample(sample)
-            for (e in s.engine.onSample(sample)) {
-                sink.emit(e)
-                aggregator.onSample(e)
-            }
-            for (r in s.roams.onSample(sample)) {
-                sink.emit(r)
-                aggregator.onSample(r)
-            }
-            updateSignals(sample)
-            if (sample is DeviceSample) checkLowBattery(s, sample)
+            checkStallLocked(s, clock.now())
+            emitLocked(s, sample)
         }
+    }
+
+    /**
+     * Stall check (caller holds sampleLock): the 1 s tick and every written sample are "alive"
+     * observations; a monotonic jump > 15 s between two of them while recording means the process
+     * was frozen, written as GapSample(reason = "stall") through the normal path (sink, live
+     * aggregator, EventEngine) and counted like a process_restart gap (excluded from recorded time,
+     * included in completeness gap time).
+     */
+    private suspend fun checkStallLocked(s: Session, now: Stamp) {
+        if (s.scenario != null) return
+        val stall = s.stalls.observe(now.tUtcMs, now.tMonoNs, s.state == RunState.RECORDING) ?: return
+        Log.w(TAG, "stall: no tick or sample for ${stall.durationMs} ms while recording")
+        emitLocked(s, GapSample(s.run.runId, now, stall.startUtcMs, stall.endUtcMs, StallDetector.REASON))
+        // Session totals are main-thread state: account the gap there.
+        command {
+            if (session === s) {
+                s.pausedMsTotal += stall.durationMs
+                s.gapMsTotal += stall.durationMs
+            }
+        }
+    }
+
+    /** sink → aggregator → engine → roam tracker → signals; caller holds sampleLock. */
+    private suspend fun emitLocked(s: Session, sample: Sample) {
+        sink.emit(sample)
+        aggregator.onSample(sample)
+        for (e in s.engine.onSample(sample)) {
+            sink.emit(e)
+            aggregator.onSample(e)
+        }
+        for (r in s.roams.onSample(sample)) {
+            sink.emit(r)
+            aggregator.onSample(r)
+        }
+        updateSignals(sample)
+        if (sample is DeviceSample) checkLowBattery(s, sample)
     }
 
     /**
@@ -697,6 +732,7 @@ class RunService : LifecycleService() {
         val pausedMs = s.pausedMsTotal + if (s.state == RunState.PAUSED) pauseDurationMs(s, now) else 0L
         sampleLock.withLock {
             if (session !== s) return
+            checkStallLocked(s, now)
             val loc = aggregator.snapshot.location
             val gpsOffset = loc?.let { l -> (l.gpsTimeMs ?: l.stamp.gpsTimeMs)?.minus(l.stamp.tUtcMs) }
             aggregator.tick(now.tMonoNs, pausedMs, gpsOffset)
@@ -705,7 +741,7 @@ class RunService : LifecycleService() {
         val remaining = protocolRemainingMs(s, now) ?: return
         if (remaining <= 0L && s.state == RunState.RECORDING && !s.autoStopQueued) {
             s.autoStopQueued = true
-            Log.i(TAG, "${s.protocol?.id ?: "length limit"} reached — stopping run ${s.run.runId}")
+            Log.i(TAG, "${s.protocol?.id ?: "length limit"} reached, stopping run ${s.run.runId}")
             command { if (session === s && s.state == RunState.RECORDING) stopLocked() }
         }
     }

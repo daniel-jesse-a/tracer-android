@@ -45,8 +45,11 @@ object Schema {
      * v2 (additive): runs.site/test_number/protocol/time_zone/method_fingerprint; probe.http_status/
      * redirect_count/final_url/expected_response; wifi_scan.features; tables waypoint, wifi_roam,
      * x_android_carrier, x_collector_log; x_android_network.ifname. v1 bundles still import.
+     *
+     * v3 (additive): location.is_mock; probe.remote_ip/ip_version/edge_pop/edge_headers/tls_cert_sha256;
+     * shared table `integrity`. v1 and v2 bundles still import (missing columns read as NULL).
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     private fun i(n: String, nn: Boolean = false) = Column(n, ColType.INTEGER, nn)
     private fun r(n: String, nn: Boolean = false) = Column(n, ColType.REAL, nn)
@@ -78,6 +81,7 @@ object Schema {
     val LOCATION = def(
         Table.LOCATION, r("lat", true), r("lon", true), r("alt_m"), r("h_acc_m"), r("v_acc_m"),
         r("speed_mps"), r("speed_acc"), r("course_deg"), r("course_acc"), i("floor"), i("gps_time_ms"), t("provider", true),
+        i("is_mock"),
     )
     val MOTION = def(Table.MOTION, t("activity"), i("confidence"), r("pressure_kpa"), r("rel_alt_m"), r("accel_mean"), r("accel_max"))
     val NETWORK_PATH = def(
@@ -104,6 +108,7 @@ object Schema {
         r("connect_ms"), r("tls_ms"), r("ttfb_ms"), r("total_ms"), i("bytes"), r("mbps"), t("interface"),
         i("is_cellular"), t("public_ip"), t("asn"), t("asn_org"),
         i("http_status"), i("redirect_count"), t("final_url"), i("expected_response"),
+        t("remote_ip"), i("ip_version"), t("edge_pop"), t("edge_headers"), t("tls_cert_sha256"),
     )
     val DEVICE = def(Table.DEVICE, r("battery"), i("charging"), i("low_power"), t("thermal_state"))
     val EVENT = def(
@@ -117,6 +122,11 @@ object Schema {
         Table.WIFI_ROAM, t("ssid"), t("from_bssid"), t("to_bssid"), t("from_band"), t("to_band"), i("from_rssi_dbm"),
         i("to_rssi_dbm"), i("link_down_ms"), r("latency_penalty_ms"), r("rtt_before_ms"), r("rtt_after_ms"),
         i("target_11k"), i("target_11v"), i("target_11r"),
+    )
+
+    /** v3: gps_time_ms follows the common triple (GNSS-aligned UTC when known). */
+    val INTEGRITY = def(
+        Table.INTEGRITY, i("gps_time_ms"), t("kind", true), t("path"), t("target", true), i("ok"), t("value"), t("detail_json"),
     )
 
     val X_ANDROID_NETWORK = def(
@@ -142,7 +152,7 @@ object Schema {
 
     val all: List<TableDef> = listOf(
         RUNS, LOCATION, MOTION, NETWORK_PATH, RADIO, WIFI_CONNECTION, CELL_SERVING, CELL_NEIGHBOUR, WIFI_SCAN,
-        GNSS_SATELLITE, PROBE, DEVICE, EVENT, ANNOTATION, METRICKIT_PAYLOAD, WAYPOINT, WIFI_ROAM,
+        GNSS_SATELLITE, PROBE, DEVICE, EVENT, ANNOTATION, METRICKIT_PAYLOAD, WAYPOINT, WIFI_ROAM, INTEGRITY,
         X_ANDROID_NETWORK, X_ANDROID_WIFI_LINK, X_ANDROID_GNSS_RAW, X_ANDROID_WIFI_RTT, X_EVENT_LABEL, X_GAP,
         X_ANDROID_CARRIER, X_COLLECTOR_LOG,
     )
@@ -169,6 +179,13 @@ object Schema {
             "ALTER TABLE wifi_scan ADD COLUMN features TEXT",
             "ALTER TABLE x_android_network ADD COLUMN ifname TEXT",
         )
+        2 -> listOf(
+            "ALTER TABLE location ADD COLUMN is_mock INTEGER",
+            "ALTER TABLE probe ADD COLUMN remote_ip TEXT", "ALTER TABLE probe ADD COLUMN ip_version INTEGER",
+            "ALTER TABLE probe ADD COLUMN edge_pop TEXT", "ALTER TABLE probe ADD COLUMN edge_headers TEXT",
+            "ALTER TABLE probe ADD COLUMN tls_cert_sha256 TEXT",
+            INTEGRITY.createSql(),
+        ) + INTEGRITY.indexSql()
         else -> emptyList()
     }
 

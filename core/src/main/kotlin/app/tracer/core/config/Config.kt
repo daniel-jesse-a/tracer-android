@@ -44,8 +44,16 @@ data class Thresholds(
     val churnHandovers: Int = 3,
     val churnWindowS: Double = 60.0,
     val churnMinSpeedMps: Double = 15.0,
-    val causeLookbackS: Double = 15.0,
+    /**
+     * Cause-evidence window: periodic signals are read as the median within T ± this many seconds,
+     * and diagnosis waits until the stream reaches T + this. (Was a never-used 15 s before v4 settings;
+     * the engine always used ±2 s, which is now the default and what is actually applied.)
+     */
+    val causeLookbackS: Double = 2.0,
 ) {
+    /** [causeLookbackS] in ms as applied by the cause engine (clamped to 0.5…15 s). */
+    val causeWindowMs: Long get() = (causeLookbackS.coerceIn(0.5, 15.0) * 1000).toLong()
+
     fun toJson(): JsonObject = buildJsonObject {
         put("gps_h_acc_m", gpsHAccM); put("gps_jump_factor", gpsJumpFactor); put("gps_jump_min_m", gpsJumpMinM)
         put("gps_min_used_sats", gpsMinUsedSats); put("gps_recover_s", gpsRecoverS); put("gps_no_fix_s", gpsNoFixS)
@@ -90,7 +98,7 @@ data class Thresholds(
                 stickyDeltaDb = int("sticky_delta_db", d.stickyDeltaDb), channelCongestionAps = int("channel_congestion_aps", d.channelCongestionAps),
                 tunnelCn0DropDb = dbl("tunnel_cn0_drop_db", d.tunnelCn0DropDb), tunnelMaxUsedSats = int("tunnel_max_used_sats", d.tunnelMaxUsedSats),
                 churnHandovers = int("churn_handovers", d.churnHandovers), churnWindowS = dbl("churn_window_s", d.churnWindowS),
-                churnMinSpeedMps = dbl("churn_min_speed_mps", d.churnMinSpeedMps), causeLookbackS = dbl("cause_lookback_s", d.causeLookbackS),
+                churnMinSpeedMps = dbl("churn_min_speed_mps", d.churnMinSpeedMps), causeLookbackS = dbl("cause_lookback_s", d.causeLookbackS).let { if (migrate && it == 15.0) d.causeLookbackS else it },
             )
         }
     }
@@ -130,17 +138,21 @@ data class RunSettings(
     val latencyIntervalMs: Long = 2_000,
     val adaptiveLatency: Boolean = true,
     val throughputIntervalMs: Long = 120_000,
-    /** Upper bound per test; the download also stops after [throughputMaxMs]. 1 MB never leaves TCP slow start. */
-    // Data budget: default path ≤ 10 MB / 2 min (≤ 300 MB/h worst case); the parallel cellular path
-    // (dual-path, while on Wi-Fi) runs every 3rd cycle (≤ 100 MB/h). Latency probes are a few kB.
-    val throughputBytes: Long = 10_000_000,
-    val throughputMaxMs: Long = 4_000,
+    /**
+     * Upper bound per test; the download is time-boxed by [throughputMaxMs] (the actual duration is
+     * recorded per probe). 1 MB never leaves TCP slow start; 10 MB finished in < 1 s on fast links.
+     */
+    // Data budget: default path ≤ 25 MB / 2 min (≤ 750 MB/h worst case, usually far less because of
+    // the 5 s time box); the parallel cellular path (dual-path, while on Wi-Fi) runs every 3rd cycle
+    // and stops at [cellularDataBudgetMb]. Latency probes are a few kB.
+    val throughputBytes: Long = 25_000_000,
+    val throughputMaxMs: Long = 5_000,
     /** Also probe the mobile-data network while Wi-Fi is the default (uses a little mobile data). */
     val dualPathProbing: Boolean = true,
     /** Overrides [dualPathProbing] when set (protocol runs pin the path). */
     val probePaths: ProbePaths? = null,
     /** Per-run cap on throughput-test bytes over cellular; once reached, cellular throughput tests pause (latency continues). */
-    val cellularDataBudgetMb: Long = 500,
+    val cellularDataBudgetMb: Long = 1_000,
     /** Internal probes: ICMP to the default gateway + UDP DNS query to each DHCP DNS server. */
     val internalProbes: Boolean = true,
     val publicIpIntervalMs: Long = 300_000,
@@ -200,7 +212,13 @@ data class RunSettings(
 
     companion object {
         /** Non-redirecting, tiny-response anycast endpoints (204/200). Redirects inflate TTFB and used to read as failures. */
-        const val SETTINGS_VERSION = 3
+        /** v4: 25 MB / 5 s speed test, 1 GB cellular budget, cause_lookback_s 2 (the window actually used). */
+        const val SETTINGS_VERSION = 4
+
+        /** v3 defaults that v4 replaces when a stored value still equals them (user edits are kept). */
+        private const val V3_THROUGHPUT_BYTES = 10_000_000L
+        private const val V3_THROUGHPUT_MAX_MS = 4_000L
+        private const val V3_CELLULAR_BUDGET_MB = 500L
 
         /** Defaults of builds ≤ 1.0.8 — used for keys missing from an un-migrated (as-recorded) settings JSON. */
         private val LEGACY_V1_DEFAULTS by lazy {
@@ -254,11 +272,13 @@ data class RunSettings(
                 latencyIntervalMs = lng("latency_interval_ms", d.latencyIntervalMs),
                 adaptiveLatency = bool("adaptive_latency", d.adaptiveLatency),
                 throughputIntervalMs = lng("throughput_interval_ms", d.throughputIntervalMs).let { if (migrate && it == 60_000L) d.throughputIntervalMs else it },
-                throughputBytes = lng("throughput_bytes", d.throughputBytes).let { if (migrate && it == 1_000_000L) d.throughputBytes else it },
-                throughputMaxMs = lng("throughput_max_ms", d.throughputMaxMs),
+                throughputBytes = lng("throughput_bytes", d.throughputBytes).let {
+                    if (migrate && (it == 1_000_000L || (version < 4 && it == V3_THROUGHPUT_BYTES))) d.throughputBytes else it },
+                throughputMaxMs = lng("throughput_max_ms", d.throughputMaxMs).let { if (migrate && version < 4 && it == V3_THROUGHPUT_MAX_MS) d.throughputMaxMs else it },
                 dualPathProbing = bool("dual_path_probing", d.dualPathProbing),
                 probePaths = ProbePaths.of(o["probe_paths"]?.jsonPrimitive?.contentOrNull),
-                cellularDataBudgetMb = lng("cellular_data_budget_mb", d.cellularDataBudgetMb),
+                cellularDataBudgetMb = lng("cellular_data_budget_mb", d.cellularDataBudgetMb)
+                    .let { if (migrate && version < 4 && it == V3_CELLULAR_BUDGET_MB) d.cellularDataBudgetMb else it },
                 internalProbes = bool("internal_probes", d.internalProbes),
                 publicIpIntervalMs = lng("public_ip_interval_ms", d.publicIpIntervalMs),
                 deviceIntervalMs = lng("device_interval_ms", d.deviceIntervalMs),

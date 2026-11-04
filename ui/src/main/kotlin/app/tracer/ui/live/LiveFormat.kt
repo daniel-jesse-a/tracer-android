@@ -10,7 +10,7 @@ import kotlin.math.roundToLong
 
 /** Number formatting for the live/analysis screens. Pure; "—" for missing values, U+2212 minus. */
 internal object Fmt {
-    const val DASH = "—"
+    const val DASH = "–"
     private const val MINUS = '−'
 
     private fun minus(s: String): String = s.replace('-', MINUS)
