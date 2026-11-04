@@ -142,6 +142,10 @@ data class TestReport(
     val segments: List<Segment>,
     val moments: List<Moment>,
     val wifiRssi: List<Pt>,
+    /** mobile anchor-cell RSRP / SINR over time; 5G (NR leg) RSRP separately */
+    val rsrpSeries: List<Pt> = emptyList(),
+    val sinrSeries: List<Pt> = emptyList(),
+    val nrRsrpSeries: List<Pt> = emptyList(),
     val newApAtS: List<Double>,
     val responseWifi: List<Pt>, val responseMobile: List<Pt>,
     val speedTests: List<SpeedTest>,
@@ -361,6 +365,8 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
     private val bssidChanges = ArrayList<Long>()
     private var lastBssid: String? = null
     private val rsrp = ArrayList<Double>(); private val sinr = ArrayList<Double>()
+    private var lastServingT = Long.MIN_VALUE
+    private val rsrpPts = ArrayList<Pair<Long, Double>>(); private val sinrPts = ArrayList<Pair<Long, Double>>(); private val nrRsrpPts = ArrayList<Pair<Long, Double>>()
     private val bands = HashMap<String, Int>()
     private var lastRat: String? = null; private val rats = HashMap<String, Int>(); private var nrSeen = false
     private val respW = ArrayList<Pair<Long, Double>>(); private val respM = ArrayList<Pair<Long, Double>>()
@@ -399,6 +405,12 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
             }
             is CellSample -> if (s.serving) {
                 see(t); s.rsrp?.let { rsrp += it.toDouble() }; s.sinr?.let { sinr += it.toDouble() }
+                // series: anchor (first serving row of a poll = PCell) and the 5G leg separately
+                if (t != lastServingT) {
+                    lastServingT = t
+                    s.rsrp?.let { rsrpPts += t to it.toDouble() }; s.sinr?.let { sinrPts += t to it.toDouble() }
+                }
+                if (s.rat == "NR") s.rsrp?.let { nrRsrpPts += t to it.toDouble() }
                 s.band?.let { bands[it] = (bands[it] ?: 0) + 1 }
                 if (s.rat == "NR") nrSeen = true
             }
@@ -567,6 +579,8 @@ class ReportBuilder(private val run: RunRecord, private val probeIntervalS: Doub
             movement = movement,
             segments = segs, moments = moments,
             wifiRssi = down(wifi.map { Pt(s(it.first), it.second) }),
+            rsrpSeries = down(rsrpPts.map { Pt(s(it.first), it.second) }), sinrSeries = down(sinrPts.map { Pt(s(it.first), it.second) }),
+            nrRsrpSeries = down(nrRsrpPts.map { Pt(s(it.first), it.second) }),
             newApAtS = roamTimes.sorted().map { s(it) },
             responseWifi = down(respW.map { Pt(s(it.first), it.second) }),
             responseMobile = down(respM.map { Pt(s(it.first), it.second) }),

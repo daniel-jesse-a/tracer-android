@@ -5,7 +5,7 @@ import kotlinx.serialization.json.*
 /** Hand-written JSON codec for [TestReport] (cache file + "summary" share item). Bump [VERSION] on shape changes. */
 object ReportJson {
     /** v2: tested flags, movement (bbox/path/stationary), coverage, edge PoPs, integrity, moment after_resume */
-    const val VERSION = 2
+    const val VERSION = 3
 
     fun encode(r: TestReport): JsonObject = buildJsonObject {
         put("v", VERSION)
@@ -31,7 +31,7 @@ object ReportJson {
             put("cause_key", m.causeKey); put("cause_title", m.causeTitle); put("cause_detail", m.causeDetail)
             put("event_id", m.eventId); put("feedback", m.feedback); put("after_resume", m.afterResume)
         }) } })
-        put("wifi_rssi", pts(r.wifiRssi)); put("new_ap_at_s", buildJsonArray { r.newApAtS.forEach { add(it) } })
+        put("wifi_rssi", pts(r.wifiRssi)); put("rsrp", pts(r.rsrpSeries)); put("sinr", pts(r.sinrSeries)); put("nr_rsrp", pts(r.nrRsrpSeries)); put("new_ap_at_s", buildJsonArray { r.newApAtS.forEach { add(it) } })
         put("response_wifi", pts(r.responseWifi)); put("response_mobile", pts(r.responseMobile))
         put("speed_tests", buildJsonArray { r.speedTests.forEach { add(buildJsonArray { add(it.tS); add(it.carrier.name); add(it.mbps) }) } })
         put("speed_test_seconds", r.speedTestSeconds); put("method_fingerprint", r.methodFingerprint)
@@ -80,7 +80,7 @@ object ReportJson {
                     m.d("lasted_s"), m.b("stayed_online") ?: true, m.s("before")?.let { Carrier.valueOf(it) }, m.s("after")?.let { Carrier.valueOf(it) },
                     m.s("cause_key"), m.s("cause_title"), m.s("cause_detail"), m.l("event_id"), m.s("feedback"), m.b("after_resume") ?: false)
             } ?: emptyList(),
-            wifiRssi = pts(o["wifi_rssi"]), newApAtS = (o["new_ap_at_s"] as? JsonArray)?.map { it.jsonPrimitive.double } ?: emptyList(),
+            wifiRssi = pts(o["wifi_rssi"]), rsrpSeries = pts(o["rsrp"]), sinrSeries = pts(o["sinr"]), nrRsrpSeries = pts(o["nr_rsrp"]), newApAtS = (o["new_ap_at_s"] as? JsonArray)?.map { it.jsonPrimitive.double } ?: emptyList(),
             responseWifi = pts(o["response_wifi"]), responseMobile = pts(o["response_mobile"]),
             speedTests = (o["speed_tests"] as? JsonArray)?.map { val a = it.jsonArray
                 SpeedTest(a[0].jsonPrimitive.double, Carrier.valueOf(a[1].jsonPrimitive.content), a[2].jsonPrimitive.double) } ?: emptyList(),
