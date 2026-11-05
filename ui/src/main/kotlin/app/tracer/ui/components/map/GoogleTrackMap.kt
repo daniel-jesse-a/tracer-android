@@ -126,10 +126,11 @@ internal fun GoogleTrackMap(
             Polyline(points = overlayLatLng, color = colors.linkedRun, width = 8f, pattern = listOf(Dash(24f), Gap(12f)))
         }
         // accuracy halo under the track
-        segments.forEach { s -> if (s.points.size >= 2) Polyline(points = s.points, color = s.color.copy(alpha = 0.22f), width = 26f) }
+        segments.forEach { s -> if (s.points.size >= 2) Polyline(points = s.points, color = s.color.copy(alpha = 0.25f), width = 40f) }
+        segments.forEach { s -> if (s.points.size >= 2 && !s.dotted) Polyline(points = s.points, color = androidx.compose.ui.graphics.Color.White, width = 22f) }
         segments.forEach { s ->
             if (s.points.size >= 2) {
-                Polyline(points = s.points, color = s.color, width = 10f, pattern = if (s.dotted) listOf(Dot(), Gap(12f)) else null)
+                Polyline(points = s.points, color = s.color, width = 15f, pattern = if (s.dotted) listOf(Dot(), Gap(12f)) else null)
             }
         }
         taRing?.let { r ->

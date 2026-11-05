@@ -129,16 +129,26 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-halo", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(13f),
-            PropertyFactory.lineOpacity(0.22f),
+            PropertyFactory.lineWidth(22f),
+            PropertyFactory.lineOpacity(0.25f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ),
     )
+    // white casing so the coloured path reads on any map background
+    style.addLayer(
+        LineLayer("$SRC_TRACK-casing", SRC_TRACK).withProperties(
+            PropertyFactory.lineColor(android.graphics.Color.WHITE),
+            PropertyFactory.lineWidth(12f),
+            PropertyFactory.lineOpacity(0.9f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        ).withFilter(solid),
+    )
     style.addLayer(
         LineLayer("$SRC_TRACK-solid", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(5f),
+            PropertyFactory.lineWidth(8f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ).withFilter(solid),
@@ -146,7 +156,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-dotted", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(5f),
+            PropertyFactory.lineWidth(8f),
             PropertyFactory.lineDasharray(arrayOf(0.6f, 1.6f)),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
         ).withFilter(dotted),
