@@ -70,6 +70,37 @@ class ReportInput(
     val sysdiagnose: String? = null,
 )
 
+/** One-line "what this means" under each KPI tile (plain language, no em dashes). */
+object Hints {
+    fun success(sr: Double): String = "Share of web requests over Wi-Fi that worked. " + when {
+        sr >= .99 -> "Healthy."
+        sr >= .9 -> "Users notice occasional failed loads."
+        else -> "About 1 in ${Math.max(2, Math.round(1 / Math.max(1 - sr, 1e-9)).toInt())} requests failed."
+    }
+    fun noInternet(f: Double): String = "Time Wi-Fi was connected but the internet did not work. " +
+        if (f > .2) "Too high: frequent cut-outs." else if (f > 0) "Short cut-outs only." else "None."
+    fun speed(m: Double?): String = "Typical download speed. " + when {
+        m == null -> "Not measured."
+        m < 1 -> "Too slow for most apps."
+        m < 5 -> "Messaging and browsing only; video struggles."
+        m < 20 -> "Fine for video calls; HD video may buffer."
+        else -> "Enough for HD video and calls."
+    }
+    fun p95(ms: Double?): String = "Wait time of the slowest 5% of requests. " + when {
+        ms == null -> "Not measured."
+        ms > 1000 -> "Over 1 s feels broken."
+        ms > 800 -> "Noticeably slow at times."
+        else -> "Responsive."
+    }
+    fun lan(good: Boolean, wanBad: Boolean): String = when {
+        good && wanBad -> "The Wi-Fi router itself answers: the fault is its internet link (backhaul)."
+        good -> "The Wi-Fi router itself answers reliably."
+        else -> "The Wi-Fi router itself is unreliable: check the access point and LAN."
+    }
+    fun mobile(verdict: String): String = "The phone SIM on its own: the baseline to compare against. " +
+        if (verdict == "PASS") "Healthy." else "Also had problems."
+}
+
 object ReportData {
     const val BIN = 15_000L
 
@@ -532,24 +563,29 @@ private class Builder(private val inp: ReportInput) {
         // KPIs
         val stallMin = stalls.sumOf { it.dur } / 60
         val kp = ArrayList<JsonObject>()
-        fun kpi(label: String, value: String, sub: String, tone: String = "") = buildJsonObject { put("label", label); put("value", value); put("sub", sub); put("tone", tone) }
+        fun kpi(label: String, value: String, sub: String, tone: String = "", hint: String = "") =
+            buildJsonObject { put("label", label); put("value", value); put("sub", sub); put("tone", tone); if (hint.isNotEmpty()) put("hint", hint) }
         if (wp != null) {
             val none = wp.health?.get(3) ?: 0.0
             kp += kpi("Wi-Fi · HTTPS success", fmt("%.1f", (wp.stats.sr ?: 0.0) * 100) + "%",
-                mp?.let { "mobile in parallel: " + fmt("%.1f", (it.stats.sr ?: 0.0) * 100) + "%" } ?: "", if (wp.verdict == "FAIL") "bad" else "")
-            kp += kpi("Wi-Fi time without internet", f0(none * 100) + "%", "${stalls.size} stalls · ${f0(stallMin)} min", if (none > .2) "bad" else "")
+                mp?.let { "mobile in parallel: " + fmt("%.1f", (it.stats.sr ?: 0.0) * 100) + "%" } ?: "", if (wp.verdict == "FAIL") "bad" else "",
+                Hints.success(wp.stats.sr ?: 0.0))
+            kp += kpi("Wi-Fi time without internet", f0(none * 100) + "%", "${stalls.size} stalls · ${f0(stallMin)} min", if (none > .2) "bad" else "",
+                Hints.noInternet(none))
             kp += kpi("Wi-Fi throughput (median)", fmt("%.1f", wp.thrMedian ?: 0.0) + " Mbps",
-                if (mp != null && mp.thr != null) "mobile in parallel: " + fmt("%.1f", mp.thrMedian ?: 0.0) + " Mbps" else "")
+                if (mp != null && mp.thr != null) "mobile in parallel: " + fmt("%.1f", mp.thrMedian ?: 0.0) + " Mbps" else "", "",
+                Hints.speed(wp.thrMedian))
             kp += kpi("Wi-Fi request p95", fmt("%.1f", (wp.stats.p95 ?: 0.0) / 1000) + " s",
-                mp?.let { "mobile in parallel: " + fmt("%.2f", (it.stats.p95 ?: 0.0) / 1000) + " s" } ?: "")
+                mp?.let { "mobile in parallel: " + fmt("%.2f", (it.stats.p95 ?: 0.0) / 1000) + " s" } ?: "", "", Hints.p95(wp.stats.p95))
         }
         val lan = layers.firstOrNull { (it["name"] as JsonPrimitive).content.startsWith("LAN") }
         if (wp != null && lan != null) {
             val st = (lan["status"] as JsonPrimitive).content
-            kp += kpi("Wi-Fi LAN gateway", st, (lan["detail"] as JsonPrimitive).content, if (st == "Good") "good" else "bad")
+            kp += kpi("Wi-Fi LAN gateway", st, (lan["detail"] as JsonPrimitive).content, if (st == "Good") "good" else "bad",
+                Hints.lan(st == "Good", (wp.stats.sr ?: 0.0) < .95))
         }
         if (ma != null) kp += kpi("$operator mobile (active) · success", fmt("%.1f", (ma.stats.sr ?: 0.0) * 100) + "%",
-            f0(ma.thrMedian ?: 0.0) + " Mbps median", if (ma.verdict == "PASS") "good" else "")
+            f0(ma.thrMedian ?: 0.0) + " Mbps median", if (ma.verdict == "PASS") "good" else "", Hints.mobile(ma.verdict))
 
         // findings
         val findings = ArrayList<String>()

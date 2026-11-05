@@ -11,7 +11,8 @@ All times are epoch ms (UTC). Fractions run from 0 to 1. Any section whose data 
 | `meta.tz_offset_min` | int | the device time-zone offset (Dubai = 240) |
 | `meta.mobile_operator` | string | mode of `asn_org` for cellular `public_ip` probes, mapped Emirates Internet→e&, EITC→du |
 | `meta.title`, `scope`, `source_note` | string | generated (see the reference script) |
-| `kpis[]` | `{label,value,sub,tone}` | up to 6 tiles. `tone` ∈ `bad`, `good`, `warn`, `""` |
+| `kpis[]` | `{label,value,sub,tone,hint?}` | up to 6 tiles. `tone` ∈ `bad`, `good`, `warn`, `""`. `hint` = one plain-language line under the tile (what it means, judged against its value) |
+| `glossary` | `[[term, meaning]]`, optional | overrides the built-in "How to read this report" glossary on page 4 |
 | `segments[]` | `{kind:'cellular'\|'wifi', start, end, label}` | runs of `network_path.primary_interface`. Runs under 30 s are dropped; the first segment starts at T0 and the last ends at T1 |
 | `paths[]` | see below | up to 3: mobile active, mobile in parallel (while Wi-Fi is active), Wi-Fi active. Skip a path with fewer than 20 checks |
 | `paths[].stats` | `{n,sr,dns,con,tls,ttfb,tot,p95}` | latency probes of that interface inside the window. Timings use successes only; `p95` is on `total_ms` |

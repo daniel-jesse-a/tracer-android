@@ -268,19 +268,32 @@ export function buildReportData(inp: ReportInput): any {
     { collector: 'sysdiagnose', captured: null, note: ios ? (inp.sysdiagnose ?? (typeof inp.completeness?.sysdiagnose === 'string' ? inp.completeness.sysdiagnose : 'none')) : 'not applicable on Android' },
   ];
 
+  // ---------- KPI hints: one line of "what this means" under each tile
+  const H = {
+    success: (sr: number) => 'Share of web requests over Wi-Fi that worked. ' + (sr >= .99 ? 'Healthy.' : sr >= .9 ? 'Users notice occasional failed loads.'
+      : `About 1 in ${Math.max(2, Math.round(1 / Math.max(1 - sr, 1e-9)))} requests failed.`),
+    noInternet: (f: number) => 'Time Wi-Fi was connected but the internet did not work. ' + (f > .2 ? 'Too high: frequent cut-outs.' : f > 0 ? 'Short cut-outs only.' : 'None.'),
+    speed: (m: number | null) => 'Typical download speed. ' + (m == null ? 'Not measured.' : m < 1 ? 'Too slow for most apps.' : m < 5 ? 'Messaging and browsing only; video struggles.'
+      : m < 20 ? 'Fine for video calls; HD video may buffer.' : 'Enough for HD video and calls.'),
+    p95: (ms: number | null) => 'Wait time of the slowest 5% of requests. ' + (ms == null ? 'Not measured.' : ms > 1000 ? 'Over 1 s feels broken.' : ms > 800 ? 'Noticeably slow at times.' : 'Responsive.'),
+    lan: (good: boolean, wanBad: boolean) => good && wanBad ? 'The Wi-Fi router itself answers: the fault is its internet link (backhaul).'
+      : good ? 'The Wi-Fi router itself answers reliably.' : 'The Wi-Fi router itself is unreliable: check the access point and LAN.',
+    mobile: (v: string) => 'The phone SIM on its own: the baseline to compare against. ' + (v === 'PASS' ? 'Healthy.' : 'Also had problems.'),
+  };
+
   // ---------- KPIs
   const stallMin = stalls.reduce((a, s) => a + s.dur, 0) / 60;
   const kp: any[] = [];
   if (wp) {
     const none = wp.health ? wp.health['3'] : 0;
-    kp.push({ label: 'Wi-Fi · HTTPS success', value: `${f((wp.stats.sr ?? 0) * 100, 1)}%`, sub: mp ? `mobile in parallel: ${f((mp.stats.sr ?? 0) * 100, 1)}%` : '', tone: wp.verdict === 'FAIL' ? 'bad' : '' });
-    kp.push({ label: 'Wi-Fi time without internet', value: `${f(none * 100, 0)}%`, sub: `${stalls.length} stalls · ${f(stallMin, 0)} min`, tone: none > .2 ? 'bad' : '' });
-    kp.push({ label: 'Wi-Fi throughput (median)', value: `${f(wp.thr?.median ?? 0, 1)} Mbps`, sub: mp && mp.thr ? `mobile in parallel: ${f(mp.thr.median ?? 0, 1)} Mbps` : '', tone: '' });
-    kp.push({ label: 'Wi-Fi request p95', value: `${f((wp.stats.p95 ?? 0) / 1000, 1)} s`, sub: mp ? `mobile in parallel: ${f((mp.stats.p95 ?? 0) / 1000, 2)} s` : '', tone: '' });
+    kp.push({ label: 'Wi-Fi · HTTPS success', value: `${f((wp.stats.sr ?? 0) * 100, 1)}%`, sub: mp ? `mobile in parallel: ${f((mp.stats.sr ?? 0) * 100, 1)}%` : '', tone: wp.verdict === 'FAIL' ? 'bad' : '', hint: H.success(wp.stats.sr ?? 0) });
+    kp.push({ label: 'Wi-Fi time without internet', value: `${f(none * 100, 0)}%`, sub: `${stalls.length} stalls · ${f(stallMin, 0)} min`, tone: none > .2 ? 'bad' : '', hint: H.noInternet(none) });
+    kp.push({ label: 'Wi-Fi throughput (median)', value: `${f(wp.thr?.median ?? 0, 1)} Mbps`, sub: mp && mp.thr ? `mobile in parallel: ${f(mp.thr.median ?? 0, 1)} Mbps` : '', tone: '', hint: H.speed(wp.thr?.median ?? null) });
+    kp.push({ label: 'Wi-Fi request p95', value: `${f((wp.stats.p95 ?? 0) / 1000, 1)} s`, sub: mp ? `mobile in parallel: ${f((mp.stats.p95 ?? 0) / 1000, 2)} s` : '', tone: '', hint: H.p95(wp.stats.p95) });
   }
   const lan = layers.find(l => l.name.startsWith('LAN'));
-  if (wp && lan) kp.push({ label: 'Wi-Fi LAN gateway', value: lan.status, sub: lan.detail, tone: lan.status === 'Good' ? 'good' : 'bad' });
-  if (ma) kp.push({ label: `${operator} mobile (active) · success`, value: `${f((ma.stats.sr ?? 0) * 100, 1)}%`, sub: `${f(ma.thr?.median ?? 0, 0)} Mbps median`, tone: ma.verdict === 'PASS' ? 'good' : '' });
+  if (wp && lan) kp.push({ label: 'Wi-Fi LAN gateway', value: lan.status, sub: lan.detail, tone: lan.status === 'Good' ? 'good' : 'bad', hint: H.lan(lan.status === 'Good', (wp.stats.sr ?? 0) < .95) });
+  if (ma) kp.push({ label: `${operator} mobile (active) · success`, value: `${f((ma.stats.sr ?? 0) * 100, 1)}%`, sub: `${f(ma.thr?.median ?? 0, 0)} Mbps median`, tone: ma.verdict === 'PASS' ? 'good' : '', hint: H.mobile(ma.verdict) });
 
   // ---------- findings
   const findings: string[] = [];

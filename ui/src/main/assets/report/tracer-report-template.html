@@ -22,7 +22,7 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,
 h1{font-size:21px;font-weight:600;margin:0 0 4px}h2{font-size:15px;font-weight:600;margin:0 0 8px}h3{font-size:12.5px;font-weight:600;margin:10px 0 5px;color:var(--ink2)}
 .sub{color:var(--ink2);margin:0 0 12px;font-size:12.5px}.eyebrow{font-size:11px;color:var(--muted);letter-spacing:.02em;margin-bottom:2px;text-transform:uppercase}
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin:0 0 12px}
-.kpi{background:var(--card);border:.5px solid var(--line);border-radius:10px;padding:8px 12px}.kpi .l{font-size:11px;color:var(--ink2)}.kpi .v{font-size:19px;font-weight:600}.kpi .s{font-size:10.5px;color:var(--muted)}
+.kpi{background:var(--card);border:.5px solid var(--line);border-radius:10px;padding:8px 12px}.kpi .l{font-size:11px;color:var(--ink2)}.kpi .v{font-size:19px;font-weight:600}.kpi .s{font-size:10.5px;color:var(--muted)}.kpi .h{font-size:10px;color:var(--ink2);margin-top:3px;line-height:1.3;border-top:.5px solid var(--grid);padding-top:3px}.gl{columns:3;column-gap:16px;font-size:10.5px;margin:0}.gl div{break-inside:avoid;margin:0 0 4px}.gl b{color:var(--ink)}.gl span{color:var(--ink2)}
 .tone-bad{color:#a32d2d}.tone-good{color:#27500a}.tone-warn{color:#854f0b}
 .card{background:var(--card);border:.5px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:start}.gmap{display:grid;grid-template-columns:1.05fr 1fr;gap:12px;align-items:start}
@@ -39,7 +39,7 @@ ul.f,ol.rec{margin:4px 0;padding-left:18px}ul.f li,ol.rec li{margin:3px 0}.note{
 table.st td{padding:1.5px 5px;font-size:10px}
 .empty{color:var(--muted);font-style:italic;font-size:12px}
 @media print{body{background:#fff;font-size:10.5px}.wrap{max-width:none;padding:0}.page{break-after:page}.card{break-inside:avoid;padding:7px 9px;margin-bottom:6px}
-.kpis{margin-bottom:6px;gap:6px}.kpi{padding:5px 8px}.kpi .v{font-size:15px}h1{font-size:16px}h2{font-size:12.5px;margin-bottom:5px}table{font-size:9.5px}td{padding:2.5px 5px}
+.kpis{margin-bottom:6px;gap:6px}.kpi{padding:5px 8px}.kpi .v{font-size:15px}.kpi .h{font-size:8.6px}.gl{font-size:8.6px;column-gap:12px}.gl div{margin:0 0 2.5px}h1{font-size:16px}h2{font-size:12.5px;margin-bottom:5px}table{font-size:9.5px}td{padding:2.5px 5px}
 .gmap{grid-template-columns:96mm 1fr}.ld{font-size:9.5px}.layer{padding:4px 8px;grid-template-columns:150px 80px 1fr}.ln,.ls{font-size:10px}table.st td{padding:1px 4px;font-size:8.6px}ul.f li,ol.rec li{margin:2px 0}}
 @media screen and (max-width:860px){.g2,.g3,.gmap,.kpis{grid-template-columns:1fr}.layer{grid-template-columns:1fr}}
 </style>
@@ -180,7 +180,7 @@ function hbar(items, unit, fmt = v => num(v, 1), w = 340) { const max = Math.max
   return `<svg viewBox="0 0 ${w} ${items.length * rh + 6}" class="full">` + items.map((it, i) => { const y = i * rh + 4, bw = it.v == null ? 0 : Math.max(it.v / max * (w - 190), 1);
     return `<text x="0" y="${y + 13}" font-size="10.5" fill="${C.ink}">${esc(it.label)}</text><rect x="130" y="${y + 3}" width="${bw.toFixed(1)}" height="13" rx="2" fill="${it.color}"/><text x="${(134 + bw).toFixed(1)}" y="${y + 13}" font-size="10.5" fill="${C.ink2}">${it.v == null ? '–' : fmt(it.v)}${unit}</text>`; }).join('') + '</svg>'; }
 
-function kpis() { return '<div class="kpis">' + (D.kpis || []).map(k => `<div class="kpi"><div class="l">${esc(k.label)}</div><div class="v ${TONE[k.tone] || ''}">${esc(k.value)}</div><div class="s">${esc(k.sub || '')}</div></div>`).join('') + '</div>'; }
+function kpis() { return '<div class="kpis">' + (D.kpis || []).map(k => `<div class="kpi"><div class="l">${esc(k.label)}</div><div class="v ${TONE[k.tone] || ''}">${esc(k.value)}</div><div class="s">${esc(k.sub || '')}</div>${k.hint ? `<div class="h">${esc(k.hint)}</div>` : ''}</div>`).join('') + '</div>'; }
 function verdicts() { return (D.paths || []).filter(p => p.verdict).map(p => `<div class="verdict"><span class="badge b-${p.verdict}">${p.verdict}</span><div><b>${esc(p.label)}</b>: ${esc(p.verdict_text)}</div></div>`).join(''); }
 function layers() { if (!has(D.wifi_layers)) return empty('No Wi-Fi connection during this run.');
   return '<div class="layers">' + D.wifi_layers.map(l => `<div class="layer"><div class="ln">${esc(l.name)}</div><div class="ls" style="border-color:${ST_COL[l.status]}"><i style="background:${ST_COL[l.status]}">${ST_ICON[l.status]}</i>${esc(l.status)}</div><div class="ld">${esc(l.detail)}</div></div>`).join('') + '</div>'; }
@@ -213,8 +213,30 @@ function stallHist() { if (!has(D.stalls)) return empty('No Wi-Fi stalls.'); con
 function thrCard() { const P = (D.paths || []).filter(p => p.thr && p.thr.n); if (!P.length) return empty('No throughput tests.');
   return hbar(P.map(p => ({label: p.short || p.label, v: p.thr.median, color: PATHC[p.kind]})), ' Mbps') + `<p class="note">${P.map(p => `${esc(p.short || p.label)}: n=${p.thr.n}, ${p.thr.under1} under 1 Mbps, max ${Math.round(p.thr.max)} Mbps`).join(' · ')}</p>`; }
 function qualityTable() { if (!has(D.quality)) return empty();
-  return '<table><tr><th>Collector</th><th class="n">Captured</th><th>Notes</th></tr>' + D.quality.map(q => `<tr><td>${esc(q.collector)}</td><td class="n">${q.captured == null ? '—' : pct(q.captured)}</td><td>${esc(q.note || '')}</td></tr>`).join('') + '</table>'; }
+  return '<table><tr><th>Collector</th><th class="n">Captured</th><th>Notes</th></tr>' + D.quality.map(q => `<tr><td>${esc(q.collector)}</td><td class="n">${q.captured == null ? '–' : pct(q.captured)}</td><td>${esc(q.note || '')}</td></tr>`).join('') + '</table>'; }
 function recs() { const R = D.recommendations || {}; return Object.entries(R).map(([k, items]) => `<h3>${esc(k)}</h3><ol class="rec">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ol>`).join('') || empty(); }
+const GLOSSARY = [
+  ['HTTPS success', 'Share of small secure test requests (Cloudflare, Google, Apple) that worked. Under 99% users notice failed loads.'],
+  ['Time without internet', 'Share of 15-second slices with no usable internet: a stall, or fewer than half the checks working, while still connected.'],
+  ['Stall', 'Wi-Fi stays connected but the internet stops: from the drop until checks work again. Feels like "connected, nothing loads".'],
+  ['Throughput', 'Download speed of a test file. About 1 Mbps for messaging, 3 to 5 for video calls, 5 to 8 for HD video.'],
+  ['p95 (request)', 'The slowest 5% of requests took at least this long. The worst-case wait; over about 1 s feels broken.'],
+  ['Connect time', 'Time to open a connection to a server, about one network round trip. Under 100 ms snappy, over 300 ms laggy.'],
+  ['DNS · TLS · TTFB · total', 'A request in steps: find the server address, set up encryption, wait for the first byte, whole request.'],
+  ['Active path', 'The connection the phone was actually using (Wi-Fi or mobile data): what the user experienced.'],
+  ['In parallel', 'The phone SIM tested at the same minutes while on Wi-Fi: what the user would have had without the Wi-Fi.'],
+  ['Verdict', 'PASS: at least 99% of checks work, slowest under 0.8 s, at least 20 Mbps. WATCH: one of these slips. FAIL: under 90% of checks, or no internet over 20% of the time.'],
+  ['Health colours', 'Good: at least 95% of checks work and connect under 150 ms. Fair: at least 80% and under 400 ms. Poor: worse. No internet: under 50% or a stall.'],
+  ['LAN gateway', 'The Wi-Fi router itself. If it answers but internet checks fail, the fault is the router\'s internet link, not the Wi-Fi radio.'],
+  ['Wi-Fi layers', 'Radio (signal), LAN (router), DNS (name lookup), WAN (router to internet), Application (real requests). The first failing layer is the fault.'],
+  ['WAN / backhaul', 'The router\'s own uplink to the internet, often a 4G/5G modem on trains. A changing public IP means it reconnected.'],
+  ['Mobile RAT', 'Mobile network type: 5G SA, 5G NSA (5G on a 4G anchor), 4G LTE, 3G, 2G. Frequent changes mean handovers and weak spots.'],
+  ['RSRP · SINR', 'Mobile signal strength (above -90 dBm good, below -110 poor) and clarity over noise (above 13 dB good, below 0 poor). Android only.'],
+  ['Phase', 'A stretch of the Wi-Fi time grouped by location quality (GPS, approximate, none), to see whether outages cluster somewhere.'],
+  ['Stall location', 'Precise: GPS fix within 60 m and under 2 min old. Coarse: rough fix under 2 min old. Stale: no recent fix.'],
+  ['Coverage / test quality', 'How much of the test each recorder captured. Low coverage limits where things happened, not the verdicts.'],
+];
+function glossary() { const G = has(D.glossary) ? D.glossary : GLOSSARY; return `<div class="gl">${G.map(([k, v]) => `<div><b>${esc(k)}:</b> <span>${esc(v)}</span></div>`).join('')}</div>`; }
 function stallAppendix() { if (!has(D.stalls)) return ''; const head = '<table class="st"><tr><th class="n">#</th><th>Time</th><th>Ph</th><th class="n">Duration</th><th>Location</th><th class="n">Lat, lon</th></tr>';
   const rows = D.stalls.map((s, i) => `<tr><td class="n">${i + 1}</td><td>${hms(s.t)}</td><td>${esc(s.phase || '')}</td><td class="n">${dur(s.dur)}</td><td>${esc(s.conf || '')}</td><td class="n">${s.lat != null ? s.lat.toFixed(4) + ', ' + s.lon.toFixed(4) : '–'}</td></tr>`);
   const n = Math.ceil(rows.length / 3); const cols = [0, 1, 2].map(c => rows.slice(c * n, (c + 1) * n)).filter(c => c.length);
@@ -246,6 +268,7 @@ document.getElementById('app').innerHTML = `
 <div class="page">
   <div class="g3">${card('Wi-Fi stalls by phase', phaseTable() + '<p class="note">Stall = 3 consecutive failed checks on all endpoints while still associated.</p>')}${card('Stall durations', stallHist())}${card('Throughput tests', thrCard())}</div>
   <div class="g2">${card('Test quality and coverage', qualityTable())}${card('Recommendations', recs())}</div>
+  ${card('How to read this report', glossary())}
 </div>
 <div>${stallAppendix()}<p class="note">${esc(m.source_note || '')}</p></div>`;
 })();
