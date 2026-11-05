@@ -97,7 +97,7 @@ jobs:
           if [ -n "$RAIL_ERGT_B64" ]; then echo "$RAIL_ERGT_B64" | base64 -d > ui/src/main/assets/report/rail_ergt.json; fi
           if [ -n "$FIXTURE_95596452_B64" ]; then mkdir -p report-v1/fixtures/95596452 && echo "$FIXTURE_95596452_B64" | base64 -d > /tmp/fx.zip && unzip -q -o -j /tmp/fx.zip -d report-v1/fixtures/95596452; echo "REPORT_V1_FIXTURE=$PWD/report-v1/fixtures/95596452" >> $GITHUB_ENV; fi
       - name: Build ReportData (Kotlin port) and sample HTML
-        run: REPORT_V1_SAMPLE_OUT=$PWD/report-out ./gradlew --no-configuration-cache :events:test --tests 'app.tracer.events.ReportV1Test' 2>&1 | tail -30; exit ${PIPESTATUS[0]}
+        run: REPORT_V1_SAMPLE_OUT=$PWD/report-out ./gradlew --no-configuration-cache :events:test --rerun --tests 'app.tracer.events.ReportV1Test' 2>&1 | tail -30; exit ${PIPESTATUS[0]}
       - name: TypeScript port (Expo) tests
         working-directory: report-v1/ts
         run: npm install --no-audit --no-fund && npm test
