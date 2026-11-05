@@ -92,6 +92,10 @@ function routeMap() {
   } else {
     const z = 20, P = pts.map(p => merc(p[0], p[1], z));
     let x0 = Math.min(...P.map(p => p[0])), x1 = Math.max(...P.map(p => p[0])), y0 = Math.min(...P.map(p => p[1])), y1 = Math.max(...P.map(p => p[1]));
+    // never frame less than ~120 m (no basemap here, so only enough to keep the scale honest)
+    const mU = 156543.03 * Math.cos(pts[0][0] * Math.PI / 180) * 256 / 2 ** z, minU = 120 / mU;
+    if (x1 - x0 < minU) { const c = (x0 + x1) / 2; x0 = c - minU / 2; x1 = c + minU / 2; }
+    if (y1 - y0 < minU * 0.6) { const c = (y0 + y1) / 2; y0 = c - minU * 0.3; y1 = c + minU * 0.3; }
     W = 700; const sc = (W - 60) / Math.max(x1 - x0, 1e-9); H = Math.max(260, Math.min(900, (y1 - y0) * sc + 60));
     const sc2 = Math.min(sc, (H - 60) / Math.max(y1 - y0, 1e-9));
     proj = (la, lo) => { const [X, Y] = merc(la, lo, z); return [30 + (X - x0) * sc2, 30 + (Y - y0) * sc2]; };

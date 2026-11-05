@@ -92,7 +92,7 @@ internal fun GoogleTrackMap(
     LaunchedEffect(loaded, follow, last?.lat, last?.lon) {
         if (!loaded || last == null) return@LaunchedEffect
         if (follow) {
-            val zoom = if (!fitted) followZoom(thinned).toFloat().also { fitted = true } else camera.position.zoom.coerceIn(14f, 19.5f)
+            val zoom = if (!fitted) followZoom(thinned).toFloat().also { fitted = true } else camera.position.zoom.coerceIn(14f, 18f)
             camera.animate(CameraUpdateFactory.newLatLngZoom(LatLng(last.lat, last.lon), zoom), 600)
         } else if (!fitted) {
             googleCameraFor(thinned)?.let { camera.move(it) }

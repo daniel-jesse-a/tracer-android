@@ -66,27 +66,50 @@ object Basemap {
             withTimeoutOrNull(timeoutMs) { runCatching { stitch(points, p, userAgent) }.getOrNull() }
         }
 
-    private suspend fun stitch(points: List<Pair<Double, Double>>, p: Provider, ua: String): JsonObject? = coroutineScope {
-        // pick the zoom whose span is 1,000–2,800 px, then scale to ~1,200 px on the long side
-        var z = 19
-        var x0 = 0.0; var x1 = 0.0; var y0 = 0.0; var y1 = 0.0
-        while (z >= 3) {
-            val m = points.map { merc(it.first, it.second, z) }
-            x0 = m.minOf { it.first }; x1 = m.maxOf { it.first }; y0 = m.minOf { it.second }; y1 = m.maxOf { it.second }
-            val padX = max((x1 - x0) * 0.06, 0.15); val padY = max((y1 - y0) * 0.06, 0.15)
-            x0 -= padX; x1 += padX; y0 -= padY; y1 += padY
-            if (max(x1 - x0, y1 - y0) * 256 <= 2800) break
+    /** Never frame less than this (m): a building test still shows its streets and neighbours. */
+    private const val MIN_FRAME_M = 300.0
+    /** Highest zoom requested; street tiles above it are often missing ("map data not available"). */
+    private const val MAX_Z = 18
+
+    private suspend fun stitch(points: List<Pair<Double, Double>>, p: Provider, ua: String): JsonObject? {
+        // try the best zoom, then step out if tiles are missing at that zoom for this area
+        val best = pickZoom(points)
+        val lowest = max(3, best - 3)
+        for (z in best downTo lowest) stitchAt(points, z, p, ua, strict = z > lowest)?.let { return it }
+        return null
+    }
+
+    /** Highest zoom ≤ [MAX_Z] at which the (padded) track fits in 2,800 px. */
+    private fun pickZoom(points: List<Pair<Double, Double>>): Int {
+        var z = MAX_Z
+        while (z > 3) {
+            val f = frame(points, z)
+            if (max(f[1] - f[0], f[3] - f[2]) * 256 <= 2800) break
             z--
         }
-        // a building-sized track: keep the highest zoom and widen the frame to ≥ 800 px around it
-        if (max(x1 - x0, y1 - y0) * 256 < 1000) {
-            val cx = (x0 + x1) / 2; val cy = (y0 + y1) / 2
-            val minHalf = 800.0 / 256 / 2
-            val hx = max((x1 - x0) / 2, minHalf); val hy = max((y1 - y0) / 2, minHalf)
-            x0 = cx - hx; x1 = cx + hx; y0 = cy - hy; y1 = cy + hy
-        }
+        return z
+    }
+
+    /** x0, x1, y0, y1 in tile units at [z]: track bbox + 6 % padding, at least [MIN_FRAME_M] each way, centred. */
+    private fun frame(points: List<Pair<Double, Double>>, z: Int): DoubleArray {
+        val m = points.map { merc(it.first, it.second, z) }
+        var x0 = m.minOf { it.first }; var x1 = m.maxOf { it.first }; var y0 = m.minOf { it.second }; var y1 = m.maxOf { it.second }
+        val padX = (x1 - x0) * 0.06; val padY = (y1 - y0) * 0.06
+        x0 -= padX; x1 += padX; y0 -= padY; y1 += padY
+        val lat = points.map { it.first }.average()
+        val mPerTile = 156_543.03 * Math.cos(Math.toRadians(lat)) / (1 shl z) * 256
+        val minHalf = MIN_FRAME_M / mPerTile / 2
+        val cx = (x0 + x1) / 2; val cy = (y0 + y1) / 2
+        val hx = max((x1 - x0) / 2, minHalf); val hy = max((y1 - y0) / 2, minHalf)
+        return doubleArrayOf(cx - hx, cx + hx, cy - hy, cy + hy)
+    }
+
+    private suspend fun stitchAt(points: List<Pair<Double, Double>>, z: Int, p: Provider, ua: String, strict: Boolean): JsonObject? = coroutineScope {
+        val f = frame(points, z)
+        val x0 = f[0]; val x1 = f[1]; val y0 = f[2]; val y1 = f[3]
         val span = max(x1 - x0, y1 - y0) * 256
-        val scale = (1200.0 / span).coerceIn(0.35, 1.0)
+        // ~1,200 px on the long side; up to 2× enlargement when we had to step out a zoom level
+        val scale = (1200.0 / span).coerceIn(0.35, 2.0)
         val tx0 = floor(x0).toInt(); val ty0 = floor(y0).toInt(); val tx1 = ceil(x1).toInt() - 1; val ty1 = ceil(y1).toInt() - 1
         val tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
         if (tiles > 120) return@coroutineScope null
@@ -100,15 +123,20 @@ object Basemap {
             async(Dispatchers.IO) {
                 ensureActive()
                 val url = p.urlTemplate.replace("{z}", "$z").replace("{x}", "${Math.floorMod(x, n)}").replace("{y}", "$y")
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 8_000; c.readTimeout = 10_000; c.setRequestProperty("User-Agent", ua)
-                try {
-                    if (c.responseCode != 200) error("tile HTTP ${c.responseCode}")
-                    Triple(x, y, c.inputStream.use { BitmapFactory.decodeStream(it) } ?: error("tile decode"))
-                } finally { c.disconnect() }
+                runCatching {
+                    val c = URL(url).openConnection() as HttpURLConnection
+                    c.connectTimeout = 8_000; c.readTimeout = 10_000; c.setRequestProperty("User-Agent", ua)
+                    try {
+                        if (c.responseCode != 200) null
+                        else c.inputStream.use { BitmapFactory.decodeStream(it) }?.let { bmp -> if (strict && isPlaceholder(bmp)) { bmp.recycle(); null } else Triple(x, y, bmp) }
+                    } finally { c.disconnect() }
+                }.getOrNull()
             }
         }
-        for ((x, y, bmp) in jobs.awaitAll()) {
+        val got = jobs.awaitAll()
+        // missing / "map data not yet available" tiles at this zoom: let the caller step out
+        if (got.count { it == null } > tiles * if (strict) 0.15 else 0.5) { got.filterNotNull().forEach { it.third.recycle() }; canvasBmp.recycle(); return@coroutineScope null }
+        for ((x, y, bmp) in got.filterNotNull()) {
             val l = ((x - tx0) * tilePx).toFloat(); val t = ((y - ty0) * tilePx).toFloat()
             canvas.drawBitmap(bmp, Rect(0, 0, bmp.width, bmp.height), RectF(l, t, l + tilePx.toFloat(), t + tilePx.toFloat()), paint)
             bmp.recycle()
@@ -125,5 +153,15 @@ object Basemap {
             putJsonArray("crop") { add(cx); add(cy); add(w); add(h) }
             put("attribution", p.attribution)
         }
+    }
+
+    /** Esri / CARTO "no data" tiles are a single flat colour: count distinct colours on a coarse grid. */
+    private fun isPlaceholder(b: Bitmap): Boolean {
+        val seen = HashSet<Int>()
+        for (i in 0 until 8) for (j in 0 until 8) {
+            seen += b.getPixel(i * (b.width - 1) / 7, j * (b.height - 1) / 7) and 0xF0F0F0
+            if (seen.size > 2) return false
+        }
+        return true
     }
 }

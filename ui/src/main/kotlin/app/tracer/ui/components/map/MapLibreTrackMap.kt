@@ -398,24 +398,24 @@ internal fun MapLibreTrackMap(
 }
 
 private const val FOLLOW_MIN_ZOOM = 14.0
-private const val FOLLOW_MAX_ZOOM = 19.5
-private const val FIT_MAX_ZOOM = 19.5
+private const val FOLLOW_MAX_ZOOM = 18.0
+private const val FIT_MAX_ZOOM = 18.0
 
-/** n, e, s, w of the track, padded to at least ~40 m so a stationary run still has some context. */
+/** n, e, s, w of the track, padded to at least ~150 m so an indoor run still shows its building and streets. */
 internal fun trackBounds(points: List<MapPoint>): DoubleArray {
     var n = -90.0; var s = 90.0; var e = -180.0; var w = 180.0
     points.forEach { p -> n = maxOf(n, p.lat); s = minOf(s, p.lat); e = maxOf(e, p.lon); w = minOf(w, p.lon) }
-    val minDeg = 0.0004 // ≈ 40 m
+    val minDeg = 0.0014 // ≈ 150 m
     if (n - s < minDeg) { val c = (n + s) / 2; n = c + minDeg / 2; s = c - minDeg / 2 }
     if (e - w < minDeg) { val c = (e + w) / 2; e = c + minDeg / 2; w = c - minDeg / 2 }
     return doubleArrayOf(n, e, s, w)
 }
 
-/** Zoom that shows the last ~3 min of movement on a phone-width map (≈ 360 dp). */
+/** Zoom that shows the last ~3 min of movement (and at least ~150 m around you) on a phone-width map. */
 internal fun followZoom(points: List<MapPoint>): Double {
     val last = points.lastOrNull() ?: return 17.0
     val recent = points.takeLast(180)
-    val spanM = recent.maxOf { app.tracer.core.util.Geo.haversineM(last.lat, last.lon, it.lat, it.lon) }.coerceAtLeast(25.0)
+    val spanM = recent.maxOf { app.tracer.core.util.Geo.haversineM(last.lat, last.lon, it.lat, it.lon) }.coerceAtLeast(70.0)
     // metres per dp at zoom z ≈ 156543 * cos(lat) / 2^z / density-independent 256-px tiles ≈ dp
     val z = Math.log(156_543.0 * Math.cos(Math.toRadians(last.lat)) * 160 / (spanM * 2.4)) / Math.log(2.0)
     return z.coerceIn(FOLLOW_MIN_ZOOM, FOLLOW_MAX_ZOOM)
