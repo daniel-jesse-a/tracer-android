@@ -307,7 +307,22 @@ export function buildReportData(inp: ReportInput): any {
     for (const s of rail?.stations || []) { const dx = (s.lon - lo) * Math.cos(la * Math.PI / 180), dy = s.lat - la, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = { name: s.name, lat: s.lat, lon: s.lon }; } }
     return best; };
   const last = L[L.length - 1];
-  const destination = inp.destination ?? (last ? nearest(last.lat, last.lon) : null) ?? rail?.destination ?? null;
+  // the station the run ends nearest to; with > 5 min recorded after the last fix, the terminal ahead in the direction of travel
+  const autoDest = () => {
+    if (!last || !rail) return null;
+    if (T1 - last.t_utc_ms > 300000) {
+      // heading: from the station the run started nearest to (else the first fix) to the last fix
+      const first = nearest(L[0].lat, L[0].lon) ?? { lat: L[0].lat, lon: L[0].lon };
+      const k = Math.cos(last.lat * Math.PI / 180), vx = (last.lon - first.lon) * k, vy = last.lat - first.lat, len = Math.hypot(vx, vy);
+      if (len > 0.005) {
+        const proj = (la: number, lo: number) => ((lo - first.lon) * k * vx + (la - first.lat) * vy) / len; const pl = proj(last.lat, last.lon);
+        let best: Station | null = null; for (const st of rail.stations || []) if (proj(st.lat, st.lon) > pl && (!best || proj(st.lat, st.lon) > proj(best.lat, best.lon))) best = st;
+        if (best) return { name: best.name, lat: best.lat, lon: best.lon };
+      }
+    }
+    return nearest(last.lat, last.lon);
+  };
+  const destination = inp.destination ?? autoDest() ?? rail?.destination ?? null;
   const gaps: any[] = [];
   for (let i = 1; i < L.length; i++) if (L[i].t_utc_ms - L[i - 1].t_utc_ms > 300000)
     gaps.push({ a: [L[i - 1].lat, L[i - 1].lon], b: [L[i].lat, L[i].lon], kind: 'nofix', label: `${hm(L[i - 1].t_utc_ms)}–${hm(L[i].t_utc_ms)} no fixes` });

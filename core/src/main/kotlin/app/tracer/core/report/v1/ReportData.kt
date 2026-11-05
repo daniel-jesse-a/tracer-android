@@ -461,6 +461,31 @@ private class Builder(private val inp: ReportInput) {
         out
     }
 
+    /**
+     * The station the run ends nearest to. When recording carried on > 5 min after the last fix (the
+     * phone lost location on the train), the run ended further along: take the terminal station in
+     * the direction of travel (start station → last fix) beyond the last fix.
+     */
+    private fun autoDestination(rail: RailData?): JsonObject? {
+        val r = rail ?: return null; val last = L.lastOrNull() ?: return null
+        if (T1 - last.stamp.tUtcMs > 300_000) {
+            // heading: from the station the run started nearest to (else the first fix) to the last fix
+            val origin = r.nearestStation(L.first().lat, L.first().lon)
+            val oLat = origin?.d("lat") ?: L.first().lat; val oLon = origin?.d("lon") ?: L.first().lon
+            val k = cos(Math.toRadians(last.lat))
+            val vx = (last.lon - oLon) * k; val vy = last.lat - oLat
+            val len = Math.sqrt(vx * vx + vy * vy)
+            if (len > 0.005) {
+                fun proj(la: Double, lo: Double) = ((lo - oLon) * k * vx + (la - oLat) * vy) / len
+                val pLast = proj(last.lat, last.lon)
+                val ahead = r.stations.mapNotNull { st -> val la = st.d("lat"); val lo = st.d("lon"); if (la == null || lo == null) null else Triple(st, la, lo) }
+                    .filter { (_, la, lo) -> proj(la, lo) > pLast }.maxByOrNull { (_, la, lo) -> proj(la, lo) }
+                if (ahead != null) return buildJsonObject { put("name", ahead.first["name"] ?: JsonNull); put("lat", ahead.second); put("lon", ahead.third) }
+            }
+        }
+        return r.nearestStation(last.lat, last.lon)
+    }
+
     // ---------- build
     fun build(): JsonObject {
         val comp = (inp.completeness?.get("collectors") as? JsonObject) ?: JsonObject(emptyMap())
@@ -552,7 +577,7 @@ private class Builder(private val inp: ReportInput) {
 
         // map
         val rail = inp.rail
-        val destination = inp.destination ?: L.lastOrNull()?.let { rail?.nearestStation(it.lat, it.lon) } ?: rail?.destination
+        val destination = inp.destination ?: autoDestination(rail) ?: rail?.destination
         val gaps = buildJsonArray {
             for (i in 1 until L.size) if (L[i].stamp.tUtcMs - L[i - 1].stamp.tUtcMs > 300_000) add(buildJsonObject {
                 put("a", buildJsonArray { add(L[i - 1].lat); add(L[i - 1].lon) }); put("b", buildJsonArray { add(L[i].lat); add(L[i].lon) })
