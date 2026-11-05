@@ -56,7 +56,7 @@ class ShareFiles @Inject constructor(
      * Raw run data stays on the device so the report can be regenerated.
      */
     suspend fun prepare(run: RunRecord, status: (String, Float?) -> Unit = { _, _ -> }): List<File> {
-        val f = exporter.pdf(run.runId) { step -> status(step.label + if (step == ReportV1Exporter.Step.DONE) "" else "…", null) }
+        val f = exporter.pdf(run.runId) { step -> status(step.label + if (step == app.tracer.ui.report.ReportV1Exporter.Step.DONE) "" else "…", null) }
         return listOf(f)
     }
 
