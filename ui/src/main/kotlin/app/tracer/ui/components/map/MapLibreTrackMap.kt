@@ -100,6 +100,14 @@ private fun buildLineFc(points: List<MapPoint>): FeatureCollection =
     if (points.size < 2) EMPTY_FC
     else FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(thinForMap(points).map { pt(it.lat, it.lon) })))
 
+/**
+ * Line width that follows the map zoom (dp at z 10 / 14 / 17 / 20): thin when zoomed out over a
+ * long route, full weight only when the map is zoomed in close (a walk inside a building).
+ */
+private fun byZoom(z10: Float, z14: Float, z17: Float, z20: Float): Expression =
+    Expression.interpolate(Expression.exponential(1.4f), Expression.zoom(),
+        Expression.stop(10, z10), Expression.stop(14, z14), Expression.stop(17, z17), Expression.stop(20, z20))
+
 private fun colorMatch(colors: TracerExtraColors): Expression {
     val stops = TrackKeys.allKeys.map { k -> Expression.stop(k, Expression.color(keyColor(k, colors).toArgb())) }
     return Expression.match(Expression.get("q"), Expression.color(colors.noData.toArgb()), *stops.toTypedArray())
@@ -129,7 +137,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-halo", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(22f),
+            PropertyFactory.lineWidth(byZoom(3f, 8f, 14f, 22f)),
             PropertyFactory.lineOpacity(0.25f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -139,7 +147,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-casing", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(android.graphics.Color.WHITE),
-            PropertyFactory.lineWidth(12f),
+            PropertyFactory.lineWidth(byZoom(2.5f, 5f, 8f, 12f)),
             PropertyFactory.lineOpacity(0.9f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -148,7 +156,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-solid", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(8f),
+            PropertyFactory.lineWidth(byZoom(1.5f, 3.2f, 5.5f, 8f)),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ).withFilter(solid),
@@ -156,7 +164,7 @@ private fun installLayers(style: Style, holder: MapLibreHolder, colors: TracerEx
     style.addLayer(
         LineLayer("$SRC_TRACK-dotted", SRC_TRACK).withProperties(
             PropertyFactory.lineColor(colorMatch(colors)),
-            PropertyFactory.lineWidth(8f),
+            PropertyFactory.lineWidth(byZoom(1.5f, 3.2f, 5.5f, 8f)),
             PropertyFactory.lineDasharray(arrayOf(0.6f, 1.6f)),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
         ).withFilter(dotted),
@@ -352,13 +360,14 @@ internal fun MapLibreTrackMap(
         val map = holder.map
         if (!styleReady || map == null || last == null) return@LaunchedEffect
         if (follow) {
-            val z = map.cameraPosition.zoom.let { if (it < 12.0) 16.0 else it }
+            // zoom to the area walked in the last few minutes: a building gets ~z19, a drive ~z15
+            val z = if (!fitted) followZoom(points) else map.cameraPosition.zoom.coerceIn(FOLLOW_MIN_ZOOM, FOLLOW_MAX_ZOOM)
+            fitted = true
             map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(last.lat, last.lon), z), 600)
         } else if (!fitted) {
-            var n = -90.0; var s = 90.0; var e = -180.0; var w = 180.0
-            points.forEach { p -> n = maxOf(n, p.lat); s = minOf(s, p.lat); e = maxOf(e, p.lon); w = minOf(w, p.lon) }
-            if (n - s < 1e-4 && e - w < 1e-4) map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(last.lat, last.lon), 16.0))
-            else map.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(n, e, s, w), 64))
+            val b = trackBounds(points)
+            map.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[0], b[1], b[2], b[3]), 64))
+            if (map.cameraPosition.zoom > FIT_MAX_ZOOM) map.moveCamera(CameraUpdateFactory.zoomTo(FIT_MAX_ZOOM))
             fitted = true
         }
     }
@@ -386,4 +395,28 @@ internal fun MapLibreTrackMap(
             }
         },
     )
+}
+
+private const val FOLLOW_MIN_ZOOM = 14.0
+private const val FOLLOW_MAX_ZOOM = 19.5
+private const val FIT_MAX_ZOOM = 19.5
+
+/** n, e, s, w of the track, padded to at least ~40 m so a stationary run still has some context. */
+internal fun trackBounds(points: List<MapPoint>): DoubleArray {
+    var n = -90.0; var s = 90.0; var e = -180.0; var w = 180.0
+    points.forEach { p -> n = maxOf(n, p.lat); s = minOf(s, p.lat); e = maxOf(e, p.lon); w = minOf(w, p.lon) }
+    val minDeg = 0.0004 // ≈ 40 m
+    if (n - s < minDeg) { val c = (n + s) / 2; n = c + minDeg / 2; s = c - minDeg / 2 }
+    if (e - w < minDeg) { val c = (e + w) / 2; e = c + minDeg / 2; w = c - minDeg / 2 }
+    return doubleArrayOf(n, e, s, w)
+}
+
+/** Zoom that shows the last ~3 min of movement on a phone-width map (≈ 360 dp). */
+internal fun followZoom(points: List<MapPoint>): Double {
+    val last = points.lastOrNull() ?: return 17.0
+    val recent = points.takeLast(180)
+    val spanM = recent.maxOf { app.tracer.core.util.Geo.haversineM(last.lat, last.lon, it.lat, it.lon) }.coerceAtLeast(25.0)
+    // metres per dp at zoom z ≈ 156543 * cos(lat) / 2^z / density-independent 256-px tiles ≈ dp
+    val z = Math.log(156_543.0 * Math.cos(Math.toRadians(last.lat)) * 160 / (spanM * 2.4)) / Math.log(2.0)
+    return z.coerceIn(FOLLOW_MIN_ZOOM, FOLLOW_MAX_ZOOM)
 }

@@ -68,7 +68,7 @@ object Basemap {
 
     private suspend fun stitch(points: List<Pair<Double, Double>>, p: Provider, ua: String): JsonObject? = coroutineScope {
         // pick the zoom whose span is 1,000–2,800 px, then scale to ~1,200 px on the long side
-        var z = 17
+        var z = 19
         var x0 = 0.0; var x1 = 0.0; var y0 = 0.0; var y1 = 0.0
         while (z >= 3) {
             val m = points.map { merc(it.first, it.second, z) }
@@ -77,6 +77,13 @@ object Basemap {
             x0 -= padX; x1 += padX; y0 -= padY; y1 += padY
             if (max(x1 - x0, y1 - y0) * 256 <= 2800) break
             z--
+        }
+        // a building-sized track: keep the highest zoom and widen the frame to ≥ 800 px around it
+        if (max(x1 - x0, y1 - y0) * 256 < 1000) {
+            val cx = (x0 + x1) / 2; val cy = (y0 + y1) / 2
+            val minHalf = 800.0 / 256 / 2
+            val hx = max((x1 - x0) / 2, minHalf); val hy = max((y1 - y0) / 2, minHalf)
+            x0 = cx - hx; x1 = cx + hx; y0 = cy - hy; y1 = cy + hy
         }
         val span = max(x1 - x0, y1 - y0) * 256
         val scale = (1200.0 / span).coerceIn(0.35, 1.0)

@@ -52,13 +52,8 @@ private fun mapStyleJson(c: TracerExtraColors, labelColor: Color): String = """[
 
 internal fun googleCameraFor(points: List<MapPoint>): CameraUpdate? {
     if (points.isEmpty()) return null
-    var n = -90.0; var s = 90.0; var e = -180.0; var w = 180.0
-    points.forEach { p -> n = maxOf(n, p.lat); s = minOf(s, p.lat); e = maxOf(e, p.lon); w = minOf(w, p.lon) }
-    return if (n - s < 1e-4 && e - w < 1e-4) {
-        CameraUpdateFactory.newLatLngZoom(LatLng(points.last().lat, points.last().lon), 16f)
-    } else {
-        CameraUpdateFactory.newLatLngBounds(LatLngBounds(LatLng(s, w), LatLng(n, e)), 64)
-    }
+    val b = trackBounds(points)
+    return CameraUpdateFactory.newLatLngBounds(LatLngBounds(LatLng(b[2], b[3]), LatLng(b[0], b[1])), 64)
 }
 
 private class GSegment(val color: Color, val dotted: Boolean, val points: List<LatLng>)
@@ -97,7 +92,7 @@ internal fun GoogleTrackMap(
     LaunchedEffect(loaded, follow, last?.lat, last?.lon) {
         if (!loaded || last == null) return@LaunchedEffect
         if (follow) {
-            val zoom = if (camera.position.zoom < 12f) 16f else camera.position.zoom
+            val zoom = if (!fitted) followZoom(thinned).toFloat().also { fitted = true } else camera.position.zoom.coerceIn(14f, 19.5f)
             camera.animate(CameraUpdateFactory.newLatLngZoom(LatLng(last.lat, last.lon), zoom), 600)
         } else if (!fitted) {
             googleCameraFor(thinned)?.let { camera.move(it) }
@@ -125,12 +120,19 @@ internal fun GoogleTrackMap(
         if (overlayLatLng.size >= 2) {
             Polyline(points = overlayLatLng, color = colors.linkedRun, width = 8f, pattern = listOf(Dash(24f), Gap(12f)))
         }
-        // accuracy halo under the track
-        segments.forEach { s -> if (s.points.size >= 2) Polyline(points = s.points, color = s.color.copy(alpha = 0.25f), width = 40f) }
-        segments.forEach { s -> if (s.points.size >= 2 && !s.dotted) Polyline(points = s.points, color = androidx.compose.ui.graphics.Color.White, width = 22f) }
+        // accuracy halo under the track; widths follow the zoom (px at z 10 / 14 / 17 / 20 like the MapLibre map)
+        val zz = camera.position.zoom
+        val lineW = when {
+            zz <= 10f -> 4f
+            zz <= 14f -> 4f + (zz - 10f) / 4f * 5f
+            zz <= 17f -> 9f + (zz - 14f) / 3f * 7f
+            else -> 16f + (zz.coerceAtMost(20f) - 17f) / 3f * 6f
+        }
+        segments.forEach { s -> if (s.points.size >= 2) Polyline(points = s.points, color = s.color.copy(alpha = 0.25f), width = lineW * 2.6f) }
+        segments.forEach { s -> if (s.points.size >= 2 && !s.dotted) Polyline(points = s.points, color = androidx.compose.ui.graphics.Color.White, width = lineW * 1.5f) }
         segments.forEach { s ->
             if (s.points.size >= 2) {
-                Polyline(points = s.points, color = s.color, width = 15f, pattern = if (s.dotted) listOf(Dot(), Gap(12f)) else null)
+                Polyline(points = s.points, color = s.color, width = lineW, pattern = if (s.dotted) listOf(Dot(), Gap(12f)) else null)
             }
         }
         taRing?.let { r ->
