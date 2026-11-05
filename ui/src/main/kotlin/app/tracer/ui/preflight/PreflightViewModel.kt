@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -102,6 +103,8 @@ data class NewTestSetup(
     /** 0 = no limit */
     val lengthMin: Int = 10,
     val simulate: Boolean = false,
+    /** Destination station for the report's route map ("" = auto: nearest station to where the run ends) */
+    val destination: String = "",
 ) {
     val siteOrNull: String? get() = site.trim().takeIf { it.isNotEmpty() }
     val paths: ProbePaths get() = when (networks) { "wifi" -> ProbePaths.WIFI_ONLY; "cellular" -> ProbePaths.CELLULAR_ONLY; else -> ProbePaths.DUAL }
@@ -123,7 +126,12 @@ class PreflightViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val deviceInfo: DeviceInfoProvider,
     private val companion: CompanionLink,
+    private val reportExporter: app.tracer.ui.report.ReportV1Exporter,
 ) : ViewModel() {
+
+    /** Stations of the rail overlay (empty when the internal ERGT asset is not bundled). */
+    val stations: List<String> by lazy { runCatching { reportExporter.stations() }.getOrDefault(emptyList()) }
+    fun setDestination(v: String) = _setup.update { it.copy(destination = v) }
 
     private data class Statics(
         val fine: Boolean, val background: Boolean,
@@ -236,6 +244,13 @@ class PreflightViewModel @Inject constructor(
         )
         // outlives this ViewModel (navigation clears it right after start)
         persistScope.launch { runCatching { settingsRepository.setLastSite(site) } }
+        val dest = s.destination
+        if (dest.isNotBlank()) persistScope.launch {
+            runCatching {
+                val id = kotlinx.coroutines.withTimeout(15_000) { controller.runId.filterNotNull().first() }
+                settingsRepository.setDestination(id, dest)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ checks

@@ -1,0 +1,10 @@
+{
+  "name": "tracer-report-v1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tracer report v1 ReportData builder (TypeScript port for the Expo app)",
+  "main": "dist/src/buildReportData.js",
+  "types": "dist/src/buildReportData.d.ts",
+  "scripts": { "build": "tsc -p .", "test": "tsc -p . && node --test dist/test/report.test.js" },
+  "devDependencies": { "typescript": "5.6.3", "@types/node": "20.17.6" }
+}

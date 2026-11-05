@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -207,6 +208,24 @@ fun NewTestScreen(
                     c.text, style = TType.sub, color = if (c.comparable) tc.text3 else tc.average,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 )
+            }
+
+            if (vm.stations.isNotEmpty() && setup.mode == "rail") {
+                Caption("Destination station")
+                var open by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+                Box {
+                    Card(padding = PaddingValues(0.dp)) {
+                        app.tracer.ui.kit.ListRow("Destination", setup.destination.ifBlank { "Auto (nearest at the end)" }, onClick = { open = true })
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        (listOf("") + vm.stations).forEach { st ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(st.ifBlank { "Auto (nearest at the end)" }) },
+                                onClick = { vm.setDestination(st); open = false },
+                            )
+                        }
+                    }
+                }
             }
 
             if (vm.isDebugBuild) {

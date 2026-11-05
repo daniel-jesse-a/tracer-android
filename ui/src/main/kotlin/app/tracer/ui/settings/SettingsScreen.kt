@@ -98,7 +98,7 @@ fun SettingsScreen(
     val linked by viewModel.linkedDevices.collectAsStateWithLifecycle()
     val autoEmail by viewModel.autoEmail.collectAsStateWithLifecycle()
     val recipients by viewModel.emailRecipients.collectAsStateWithLifecycle()
-    val emailZip by viewModel.emailZip.collectAsStateWithLifecycle()
+    val basemap by viewModel.basemap.collectAsStateWithLifecycle()
 
     var picker by remember { mutableStateOf<PickerSpec?>(null) }
     var number by remember { mutableStateOf<NumberSpec?>(null) }
@@ -157,7 +157,7 @@ fun SettingsScreen(
                 })
             }
 
-            Caption("Email reports")
+            Caption("Report")
             Group {
                 ToggleRow("Offer email after each test", "Asks when a test ends, then opens a ready-to-send email", autoEmail) { viewModel.setAutoEmail(it) }
                 Sep()
@@ -167,7 +167,13 @@ fun SettingsScreen(
                     }
                 })
                 Sep()
-                ToggleRow("Attach full data", "ZIP for engineers, when under 17 MB", emailZip) { viewModel.setEmailZip(it) }
+                val bm = app.tracer.ui.report.Basemap.PROVIDERS
+                val bi = bm.indexOfFirst { it.id == basemap }
+                ListRow("Report map tiles", if (bi >= 0) bm[bi].label else "Off", onClick = {
+                    picker = PickerSpec("Report map tiles", bm.map { it.label } + "Off (plain background)", if (bi >= 0) bi else bm.size) { i ->
+                        viewModel.setBasemap(if (i < bm.size) bm[i].id else app.tracer.ui.report.Basemap.OFF)
+                    }
+                }, sub = "Online only; attribution is printed on the map")
             }
 
             Caption("Companions")

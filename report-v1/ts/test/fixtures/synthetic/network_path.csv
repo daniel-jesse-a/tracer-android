@@ -1,0 +1,3 @@
+id,run_id,t_utc_ms,t_mono_ns,status,interfaces,primary_interface,is_expensive,is_constrained,ipv4,ipv6,link_quality,unsatisfied_reason
+1,95596452-aaaa-4bbb-8ccc-000000000001,1793796000000,1793796000000000000,satisfied,cellular,cellular,,,,,,
+2,95596452-aaaa-4bbb-8ccc-000000000001,1793796600000,1793796600000000000,satisfied,"wifi,cellular",wifi,,,,,,

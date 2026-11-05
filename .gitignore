@@ -12,3 +12,8 @@
 *.aab
 *.keystore
 !app/debug.keystore
+
+# Etihad Rail ERGT overlay: internal data, never commit (CI writes it from the RAIL_ERGT_B64 secret)
+ui/src/main/assets/report/rail_ergt.json
+# report v1 fixtures with real run data
+report-v1/fixtures/

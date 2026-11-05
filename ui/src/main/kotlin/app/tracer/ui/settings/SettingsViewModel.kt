@@ -40,7 +40,7 @@ class SettingsViewModel @Inject constructor(
     val defaultMovement: StateFlow<String> = repository.defaultMovement.state("walk")
     val autoEmail: StateFlow<Boolean> = repository.autoEmail.state(true)
     val emailRecipients: StateFlow<List<String>> = repository.emailRecipients.state(emptyList())
-    val emailZip: StateFlow<Boolean> = repository.emailZip.state(true)
+    val basemap: StateFlow<String> = repository.basemapProvider.state("esri_street")
 
     /** Companion phones seen in imported / linked runs. */
     val linkedDevices: StateFlow<Int> = runs.observeRuns().map { list -> CompanionDevices.from(list.map { it.run }).size }.state(0)
@@ -63,7 +63,7 @@ class SettingsViewModel @Inject constructor(
     fun setDefaultMovement(v: String) { viewModelScope.launch { repository.setDefaultMovement(v) } }
     fun setAutoEmail(on: Boolean) { viewModelScope.launch { repository.setAutoEmail(on) } }
     fun setEmailRecipients(v: List<String>) { viewModelScope.launch { repository.setEmailRecipients(v) } }
-    fun setEmailZip(on: Boolean) { viewModelScope.launch { repository.setEmailZip(on) } }
+    fun setBasemap(id: String) { viewModelScope.launch { repository.setBasemapProvider(id) } }
 
     /** @return an error to show, or null when added. */
     fun addEndpoint(url: String, label: String): String? {

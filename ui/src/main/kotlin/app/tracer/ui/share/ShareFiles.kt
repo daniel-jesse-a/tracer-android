@@ -37,8 +37,8 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 
 /**
- * Builds the share items (PDF report, summary JSON with comparison, full-data ZIP) and delivers
- * them: Downloads folder, email composer, share sheet. Shared by the Share screen and the
+ * Builds the export (the Tracer report v1 PDF) and delivers it: Downloads folder, email composer,
+ * share sheet. Shared by the Share screen and the
  * automatic email step after each test.
  */
 @Singleton
@@ -47,38 +47,17 @@ class ShareFiles @Inject constructor(
     private val reports: ReportRepository,
     private val runs: RunRepository,
     private val bundles: BundleService,
+    private val exporter: app.tracer.ui.report.ReportV1Exporter,
 ) {
     val authority: String get() = bundles.fileProviderAuthority
 
-    /** Writes the selected items into cacheDir/exports/share-<runId>/ (covered by the export FileProvider). */
-    suspend fun prepare(
-        run: RunRecord, r: TestReport, pdf: Boolean, summary: Boolean, zip: Boolean,
-        status: (String, Float?) -> Unit = { _, _ -> },
-    ): List<File> {
-        val dir = File(context.cacheDir, "exports/share-${safe(run.runId)}")
-        withContext(Dispatchers.IO) { dir.deleteRecursively(); dir.mkdirs() }
-        val base = ReportPdf.baseName(run, run.runId)
-        val out = mutableListOf<File>()
-        if (pdf) {
-            status("Making the report…", null)
-            val f = File(dir, ReportPdf.fileName(run, run.runId))
-            withContext(Dispatchers.Default) { ReportPdf.write(r, run, f) }
-            out += f
-        }
-        if (summary) {
-            status("Writing the summary…", null)
-            val compare = runCatching { compareJson(run, r) }.onFailure { Log.w(TAG, "comparison failed", it) }.getOrNull()
-            val obj = ReportJson.encode(r).let { if (compare != null) JsonObject(it + ("compare" to compare)) else it }
-            val f = File(dir, "${base}_summary.json")
-            withContext(Dispatchers.IO) { f.writeText(PRETTY.encodeToString(JsonObject.serializer(), obj)) }
-            out += f
-        }
-        if (zip) {
-            status("Packing the full data…", 0f)
-            out += bundles.export(run.runId) { p -> status("Packing the full data…", p.coerceIn(0f, 1f)) }
-        }
-        status("Ready", null)
-        return out
+    /**
+     * The export: one "Tracer report v1" PDF and nothing else (no HTML, ZIP or summary files).
+     * Raw run data stays on the device so the report can be regenerated.
+     */
+    suspend fun prepare(run: RunRecord, status: (String, Float?) -> Unit = { _, _ -> }): List<File> {
+        val f = exporter.pdf(run.runId) { step -> status(step.label + if (step == ReportV1Exporter.Step.DONE) "" else "…", null) }
+        return listOf(f)
     }
 
     /**

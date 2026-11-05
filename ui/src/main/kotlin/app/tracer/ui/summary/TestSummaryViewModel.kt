@@ -125,39 +125,47 @@ class TestSummaryViewModel @Inject constructor(
         }
     }
 
-    /** Saves report + summary + full data to Downloads/Tracer. */
+    private var exportJob: kotlinx.coroutines.Job? = null
+
+    /** Stops a report that is still being built. */
+    fun cancelExport() {
+        exportJob?.cancel(); exportJob = null
+        _delivery.value = Delivery(text = "Cancelled")
+    }
+
+    /** Saves the report PDF to Downloads/Tracer. */
     fun download() {
         val ready = state.value as? ReportState.Ready ?: return
         if (_delivery.value.busy) return
-        viewModelScope.launch {
-            _delivery.value = Delivery(busy = true, text = "Saving to Downloads…")
-            _delivery.value = try {
-                val list = files.prepare(ready.run, ready.report, pdf = true, summary = true, zip = true) { s, _ -> _delivery.value = Delivery(true, s) }
+        exportJob = viewModelScope.launch {
+            _delivery.value = Delivery(busy = true, text = "Building the report…")
+            try {
+                val list = files.prepare(ready.run) { s, _ -> _delivery.value = Delivery(true, s) }
                 val where = files.saveToDownloads(list)
-                Delivery(text = "Saved ${list.size} files to $where")
+                _delivery.value = Delivery(text = "Saved ${list.first().name} to $where")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.w(TAG, "download failed", e); Delivery(text = "Download failed: ${e.message ?: e.javaClass.simpleName}", failed = true)
+                Log.w(TAG, "download failed", e); _delivery.value = Delivery(text = "Download failed: ${e.message ?: e.javaClass.simpleName}", failed = true)
             }
         }
     }
 
-    /** Builds the files, keeps a copy in Downloads, and opens the pre-filled email. */
+    /** Builds the report PDF, keeps a copy in Downloads, and opens the pre-filled email with only the PDF attached. */
     fun email(auto: Boolean = false) {
         val ready = state.value as? ReportState.Ready ?: return
         if (_delivery.value.busy) return
-        viewModelScope.launch {
+        exportJob = viewModelScope.launch {
             val to = settings.emailRecipients.first()
-            if (to.isEmpty()) { _delivery.value = Delivery(text = "Add email recipients in Settings › Email reports", failed = true); return@launch }
-            _delivery.value = Delivery(busy = true, text = if (auto) "Preparing the report email…" else "Preparing email…")
+            if (to.isEmpty()) { _delivery.value = Delivery(text = "Add email recipients in Settings › Report", failed = true); return@launch }
+            _delivery.value = Delivery(busy = true, text = if (auto) "Building the report for email…" else "Building the report…")
             try {
-                val withZip = settings.emailZip.first()
-                val list = files.prepare(ready.run, ready.report, pdf = true, summary = true, zip = withZip) { s, _ -> _delivery.value = Delivery(true, s) }
+                val list = files.prepare(ready.run) { s, _ -> _delivery.value = Delivery(true, s) }
                 val where = files.saveToDownloads(list)
-                val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
-                val note = if (big.isNotEmpty())
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email. It is saved on the phone in $where." else null
-                _email.value = files.emailIntent(ready.run, ready.report, list - big.toSet(), to, note)
+                _email.value = files.emailIntent(ready.run, ready.report, list, to, null)
                 _delivery.value = Delivery(text = "Email to ${to.joinToString()}: tap Send. Copy saved to $where.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "email failed", e)
                 _delivery.value = Delivery(text = "Email failed: ${e.message ?: e.javaClass.simpleName}", failed = true)

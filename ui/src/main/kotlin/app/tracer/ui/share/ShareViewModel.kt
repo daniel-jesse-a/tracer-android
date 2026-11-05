@@ -43,7 +43,8 @@ data class ShareUi(
     val result: String? = null,
     val failed: Boolean = false,
 ) {
-    val count: Int get() = listOf(pdf, summary, zip).count { it }
+    /** The export is always exactly one file: the report PDF. */
+    val count: Int get() = 1
 }
 
 @HiltViewModel
@@ -77,9 +78,6 @@ class ShareViewModel @Inject constructor(
         viewModelScope.launch { settings.emailRecipients.collect { to -> _ui.update { it.copy(recipients = to) } } }
     }
 
-    fun togglePdf() = _ui.update { if (it.busy) it else it.copy(pdf = !it.pdf, result = null) }
-    fun toggleSummary() = _ui.update { if (it.busy) it else it.copy(summary = !it.summary, result = null) }
-    fun toggleZip() = _ui.update { if (it.busy) it else it.copy(zip = !it.zip, result = null) }
     fun setDest(d: ShareDest) = _ui.update {
         if (it.busy || (d == ShareDest.SERVER && it.uploadUrl == null)) it else it.copy(dest = d, result = null)
     }
@@ -98,12 +96,7 @@ class ShareViewModel @Inject constructor(
                 "Saved ${items(list.size)} to $where"
             }.invoke(run, report)
             ShareDest.EMAIL -> job("Emailed") { list ->
-                val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
-                val note = if (big.isNotEmpty()) {
-                    val where = files.saveToDownloads(big)
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email, so it was saved to $where on the phone."
-                } else null
-                _pendingEmail.value = files.emailIntent(run, report, list - big.toSet(), u.recipients, note)
+                _pendingEmail.value = files.emailIntent(run, report, list, u.recipients, null)
                 "Opened email to ${u.recipients.joinToString()}"
             }.invoke(run, report)
             ShareDest.SHARE -> job("Shared") { files ->
@@ -153,13 +146,23 @@ class ShareViewModel @Inject constructor(
         _ui.update { it.copy(result = message, failed = true) }
     }
 
+    private var running: kotlinx.coroutines.Job? = null
+
+    /** Cancels a report that is still being built. */
+    fun cancel() {
+        running?.cancel(); running = null
+        _ui.update { it.copy(busy = false, status = null, progress = null, result = "Cancelled", failed = false) }
+    }
+
     private fun job(verb: String, deliver: suspend (List<File>) -> String): (RunRecord, TestReport) -> Unit = { run, report ->
         _ui.update { it.copy(busy = true, result = null, failed = false, status = "Preparing…", progress = null) }
-        viewModelScope.launch {
+        running = viewModelScope.launch {
             try {
                 val files = prepare(run, report)
                 val msg = deliver(files)
                 _ui.update { it.copy(busy = false, status = null, progress = null, result = msg, failed = false) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "$verb failed", e)
                 _ui.update { it.copy(busy = false, status = null, progress = null, result = "Failed: ${e.message ?: e.javaClass.simpleName}", failed = true) }
@@ -170,8 +173,7 @@ class ShareViewModel @Inject constructor(
     private fun status(s: String, p: Float?) = _ui.update { it.copy(status = s, progress = p) }
 
     private suspend fun prepare(run: RunRecord, r: TestReport): List<File> {
-        val u = _ui.value
-        return files.prepare(run, r, u.pdf, u.summary, u.zip) { st, p -> status(st, p) }
+        return files.prepare(run) { st, p -> status(st, p) }
     }
 
     private companion object {

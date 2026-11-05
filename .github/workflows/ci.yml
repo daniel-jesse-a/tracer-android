@@ -20,6 +20,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Rail overlay (internal ERGT asset from secret, optional)
+        env: { RAIL_ERGT_B64: "${{ secrets.RAIL_ERGT_B64 }}" }
+        run: |
+          if [ -n "$RAIL_ERGT_B64" ]; then echo "$RAIL_ERGT_B64" | base64 -d > ui/src/main/assets/report/rail_ergt.json; echo "rail overlay bundled"; else echo "no RAIL_ERGT_B64 secret: building without the rail overlay"; fi
       - name: Assemble debug APK
         run: ./gradlew --no-configuration-cache --stacktrace --continue :app:assembleDebug 2>&1 | tee build-log.txt; exit ${PIPESTATUS[0]}
       - name: Upload build log
@@ -73,3 +77,40 @@ jobs:
             test-log.txt
             lint-log.txt
             **/build/reports/**
+
+  report-sample:
+    name: Report v1 sample PDFs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Rail overlay + fixture (optional secrets)
+        env:
+          RAIL_ERGT_B64: "${{ secrets.RAIL_ERGT_B64 }}"
+          FIXTURE_95596452_B64: "${{ secrets.FIXTURE_95596452_B64 }}"
+        run: |
+          if [ -n "$RAIL_ERGT_B64" ]; then echo "$RAIL_ERGT_B64" | base64 -d > ui/src/main/assets/report/rail_ergt.json; fi
+          if [ -n "$FIXTURE_95596452_B64" ]; then mkdir -p report-v1/fixtures/95596452 && echo "$FIXTURE_95596452_B64" | base64 -d > /tmp/fx.zip && unzip -q -o -j /tmp/fx.zip -d report-v1/fixtures/95596452; echo "REPORT_V1_FIXTURE=$PWD/report-v1/fixtures/95596452" >> $GITHUB_ENV; fi
+      - name: Build ReportData (Kotlin port) and sample HTML
+        run: REPORT_V1_SAMPLE_OUT=$PWD/report-out ./gradlew --no-configuration-cache :events:test --tests 'app.tracer.events.ReportV1Test' 2>&1 | tail -30; exit ${PIPESTATUS[0]}
+      - name: TypeScript port (Expo) tests
+        working-directory: report-v1/ts
+        run: npm install --no-audit --no-fund && npm test
+      - name: Print PDFs (headless Chrome, A4 landscape) and check page counts
+        run: |
+          set -e
+          for h in report-out/*.html; do
+            p="${h%.html}.pdf"
+            google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer --print-to-pdf="$p" "file://$PWD/$h" 2>/dev/null
+            n=$(python3 -c "import re,sys; d=open(sys.argv[1],'rb').read(); print(len(re.findall(rb'/Type\s*/Page(?!s)', d)))" "$p")
+            echo "$p: $n pages"
+            case "$h" in *Tracer_report_95596452*) [ "$n" = "5" ] || { echo "expected 5 pages"; exit 1; };; esac
+          done
+      - name: Upload sample PDFs
+        uses: actions/upload-artifact@v4
+        with: { name: report-v1-sample-pdfs, path: "report-out/*.pdf" }

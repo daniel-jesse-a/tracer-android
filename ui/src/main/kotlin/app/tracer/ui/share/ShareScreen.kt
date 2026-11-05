@@ -89,11 +89,9 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
         ReportGate(state) { _, r ->
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 TitleBlock(eyebrow = r.title, title = "What to send")
-                SendItem(Icons.Outlined.Description, "Report", "PDF · for anyone", ui.pdf, vm::togglePdf)
-                Spacer(Modifier.height(K.gap))
-                SendItem(Icons.Outlined.BarChart, "Summary", "Compare tests", ui.summary, vm::toggleSummary)
-                Spacer(Modifier.height(K.gap))
-                SendItem(Icons.Outlined.Inventory2, "Full data", "ZIP · for engineers", ui.zip, vm::toggleZip)
+                SendItem(Icons.Outlined.Description, "Network test report", "PDF · 5 pages · A4 landscape", true) {}
+                Text("Only the PDF is shared. The raw run stays on this phone so the report can be rebuilt.",
+                    style = TType.footnote.copy(fontSize = 14.sp), color = tc.text3, modifier = Modifier.padding(start = 4.dp, top = 10.dp))
                 Caption("Send to")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap)) {
                     DestCard(Icons.Outlined.Download, "Download", ui.dest == ShareDest.DOWNLOAD, true, Modifier.weight(1f)) { vm.setDest(ShareDest.DOWNLOAD) }
@@ -108,7 +106,7 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 }
                 val hint = when (ui.dest) {
                     ShareDest.DOWNLOAD -> "Saves to Downloads/Tracer on this phone."
-                    ShareDest.EMAIL -> "To ${ui.recipients.joinToString()} · change in Settings › Email reports."
+                    ShareDest.EMAIL -> "To ${ui.recipients.joinToString()} · change in Settings › Report."
                     else -> null
                 }
                 if (hint != null) Text(hint, style = TType.footnote.copy(fontSize = 14.sp), color = tc.text3, modifier = Modifier.padding(start = 4.dp, top = 10.dp))
@@ -127,6 +125,8 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 val p = ui.progress
                 if (p != null) LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = tc.link, trackColor = tc.card2)
                 else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = tc.link, trackColor = tc.card2)
+                Spacer(Modifier.height(8.dp))
+                Pill("Cancel", vm::cancel, Modifier.fillMaxWidth(), kind = PillKind.SECONDARY, height = 44.dp)
                 Spacer(Modifier.height(12.dp))
             } else if (result != null) {
                 Text(result, style = TType.sub, color = if (ui.failed) tc.bad else tc.veryGood, textAlign = TextAlign.Center,
@@ -138,7 +138,7 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
             }
             val n = ui.count
             Pill(
-                "$verb $n ${if (n == 1) "item" else "items"}",
+                "$verb report PDF",
                 onClick = { if (ui.dest == ShareDest.FILES) pickFolder.launch(null) else vm.send() },
                 modifier = Modifier.fillMaxWidth(), kind = PillKind.BLUE, enabled = n > 0 && !ui.busy,
             )

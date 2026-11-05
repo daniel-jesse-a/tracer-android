@@ -62,7 +62,7 @@ fun TestSummaryScreen(
             title = { Text("Email this test?", style = TType.title, color = tc.text) },
             text = {
                 Column {
-                    Text("Send the PDF report, summary and full data to ${to.joinToString(" and ")}. A copy is also saved in Downloads/Tracer.",
+                    Text("Send the PDF report to ${to.joinToString(" and ")}. A copy is also saved in Downloads/Tracer.",
                         style = TType.sub, color = tc.text2)
                     Row(Modifier.padding(top = 14.dp).clickable { never = !never }, verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.Checkbox(checked = never, onCheckedChange = { never = it })
@@ -87,7 +87,7 @@ fun TestSummaryScreen(
     Screen {
         TopLinks(back = "Tests", onBack = onBack, action = "Share", onAction = onShare)
         ReportGate(state) { _, r ->
-            SummaryBody(r, onShare, onDiagnostics, onMoment, delivery, onDownload = vm::download, onEmail = { vm.email() })
+            SummaryBody(r, onShare, onDiagnostics, onMoment, delivery, onDownload = vm::download, onEmail = { vm.email() }, onCancel = vm::cancelExport)
         }
     }
 }
@@ -95,7 +95,7 @@ fun TestSummaryScreen(
 @Composable
 private fun ColumnScope.SummaryBody(
     r: TestReport, onShare: () -> Unit, onDiagnostics: () -> Unit, onMoment: (Int) -> Unit,
-    delivery: Delivery, onDownload: () -> Unit, onEmail: () -> Unit,
+    delivery: Delivery, onDownload: () -> Unit, onEmail: () -> Unit, onCancel: () -> Unit,
 ) {
     Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
         TitleBlock(eyebrow = eyebrowOf(r), title = r.headline)
@@ -185,8 +185,8 @@ private fun ColumnScope.SummaryBody(
         Pill("Full diagnostics", onDiagnostics, Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Pill("Download", onDownload, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
-            Pill("Email", onEmail, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
+            Pill("Download PDF", onDownload, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
+            Pill("Email PDF", onEmail, Modifier.weight(1f), kind = PillKind.SECONDARY_BLUE, enabled = !delivery.busy)
         }
         Spacer(Modifier.height(12.dp))
         Pill("Share report", onShare, Modifier.fillMaxWidth(), kind = PillKind.SECONDARY_BLUE)
@@ -197,7 +197,9 @@ private fun ColumnScope.SummaryBody(
                 if (delivery.busy) CircularProgressIndicator(Modifier.size(16.dp), color = tc.link, strokeWidth = 2.dp)
                 else Dot(if (delivery.failed) tc.bad else tc.veryGood, 8.dp)
                 Spacer(Modifier.width(10.dp))
-                Text(dt, style = TType.footnote.copy(fontSize = 14.sp), color = if (delivery.failed) tc.bad else tc.text2)
+                Text(dt, style = TType.footnote.copy(fontSize = 14.sp), color = if (delivery.failed) tc.bad else tc.text2, modifier = Modifier.weight(1f))
+                if (delivery.busy) Text("Cancel", style = TType.label, color = tc.link,
+                    modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 8.dp, vertical = 4.dp))
             }
         }
         Spacer(Modifier.height(24.dp))

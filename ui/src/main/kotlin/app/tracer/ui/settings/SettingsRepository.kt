@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 import javax.inject.Inject
@@ -124,6 +125,22 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    // ---- report v1
+
+    /** Basemap tile provider id for the PDF route map (Basemap.PROVIDERS ids, or "off"). */
+    val basemapProvider: Flow<String> = safeData.map { it[KEY_BASEMAP] ?: "esri_street" }.distinctUntilChanged()
+    suspend fun setBasemapProvider(id: String) { store.edit { it[KEY_BASEMAP] = id } }
+
+    /** Destination station picked in New Test, per run id ("" = auto: nearest station to the end). */
+    suspend fun destinationFor(runId: String): String? =
+        safeData.map { p -> (p[KEY_DEST] ?: "").split('\n').map { it.split('\t') }.firstOrNull { it.size == 2 && it[0] == runId }?.get(1) }.first()
+    suspend fun setDestination(runId: String, station: String?) {
+        store.edit { p ->
+            val rows = (p[KEY_DEST] ?: "").split('\n').filter { it.isNotBlank() && !it.startsWith("$runId\t") }.takeLast(199)
+            p[KEY_DEST] = (rows + if (station.isNullOrBlank()) emptyList() else listOf("$runId\t$station")).joinToString("\n")
+        }
+    }
+
     /** Guided-fix popups the user asked not to show again (Limit names). */
     val mutedLimits: Flow<Set<String>> = safeData.map { (it[KEY_MUTED_LIMITS] ?: "").split(',').filter { s -> s.isNotBlank() }.toSet() }
     suspend fun setLimitMuted(name: String, muted: Boolean) {
@@ -154,6 +171,8 @@ class SettingsRepository @Inject constructor(
         val KEY_EMAIL_TO = stringPreferencesKey("email_to")
         val KEY_EMAIL_ZIP = stringPreferencesKey("email_zip")
         val KEY_EMAILED = stringPreferencesKey("email_done_runs")
+        val KEY_BASEMAP = stringPreferencesKey("report_basemap")
+        val KEY_DEST = stringPreferencesKey("report_destinations")
         val KEY_MUTED_LIMITS = stringPreferencesKey("fix_muted_limits")
         const val DEFAULT_EMAIL_TO = "daniel.alphonsus@etihadrail.ae,eric.artau@etihadrail.ae"
     }
