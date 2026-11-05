@@ -62,6 +62,7 @@ class RunLibraryViewModel @Inject constructor(
     private val bundles: BundleService,
     private val settings: SettingsRepository,
     controller: RunController,
+    private val shareFiles: app.tracer.ui.share.ShareFiles,
 ) : ViewModel() {
 
     val runs: StateFlow<List<RunListItem>?> = repository.observeRuns().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -184,7 +185,7 @@ class RunLibraryViewModel @Inject constructor(
         }
     }
 
-    /** Exports each run to a bundle and emits a share request (ACTION_SEND / ACTION_SEND_MULTIPLE). */
+    /** Builds each run's report PDF (the only export; raw data stays on the phone) and emits a share request. */
     fun share(ids: Collection<String>) {
         if (_busy.value != null || ids.isEmpty()) return
         viewModelScope.launch {
@@ -192,9 +193,10 @@ class RunLibraryViewModel @Inject constructor(
             val files = mutableListOf<File>()
             try {
                 ids.forEachIndexed { i, id ->
-                    files += bundles.export(id) { p -> _busy.value = (i + p.coerceIn(0f, 1f)) / ids.size }
+                    val run = repository.getRun(id)?.takeIf { it.endedAt != null } ?: return@forEachIndexed
+                    files += shareFiles.preparePdf(run) { _, p -> _busy.value = (i + (p ?: 0f).coerceIn(0f, 1f)) / ids.size }
                 }
-                _share.send(ShareRequest(files, bundles.fileProviderAuthority))
+                if (files.isNotEmpty()) _share.send(ShareRequest(files, bundles.fileProviderAuthority))
                 _selection.value = emptySet()
             } catch (e: Exception) {
                 Log.e(TAG, "export failed", e)

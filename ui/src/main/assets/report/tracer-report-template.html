@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tracer network test report</title>
+<!--
+  Tracer network test report template, v1
+  ---------------------------------------
+  Self-contained: no external scripts, fonts or network calls, so it renders offline in a
+  WKWebView / Android WebView and prints to PDF (expo-print, PrintManager, headless Chrome).
+  To use: replace the JSON inside <script id="report-data"> with a ReportData object
+  (see REPORT_DATA_CONTRACT.md). Everything on the page is derived from that object.
+-->
+<style>
+@page{size:A4 landscape;margin:8mm}
+*{box-sizing:border-box}
+:root{--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--line:#d3d1c7;--bg:#f6f5f2;--card:#fcfcfb;
+--mob:#2a78d6;--wifi:#eb6834;--good:#0ca30c;--fair:#fab219;--poor:#ec835a;--bad:#d03b3b;--nodata:#b4b2a9}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);font-size:13px;line-height:1.45;font-variant-numeric:tabular-nums}
+.wrap{max-width:1200px;margin:0 auto;padding:22px 20px 40px}
+h1{font-size:21px;font-weight:600;margin:0 0 4px}h2{font-size:15px;font-weight:600;margin:0 0 8px}h3{font-size:12.5px;font-weight:600;margin:10px 0 5px;color:var(--ink2)}
+.sub{color:var(--ink2);margin:0 0 12px;font-size:12.5px}.eyebrow{font-size:11px;color:var(--muted);letter-spacing:.02em;margin-bottom:2px;text-transform:uppercase}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin:0 0 12px}
+.kpi{background:var(--card);border:.5px solid var(--line);border-radius:10px;padding:8px 12px}.kpi .l{font-size:11px;color:var(--ink2)}.kpi .v{font-size:19px;font-weight:600}.kpi .s{font-size:10.5px;color:var(--muted)}
+.tone-bad{color:#a32d2d}.tone-good{color:#27500a}.tone-warn{color:#854f0b}
+.card{background:var(--card);border:.5px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:start}.gmap{display:grid;grid-template-columns:1.05fr 1fr;gap:12px;align-items:start}
+svg{display:block}svg.full{width:100%;height:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:var(--ink2);font-weight:600;border-bottom:.6px solid #b4b2a9;padding:5px 6px}td{padding:4px 6px;border-bottom:.4px solid var(--grid);vertical-align:top}.n{text-align:right}
+table.cmp td:first-child{color:var(--ink2)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:#2c2c2a;margin:6px 0 0}.legend span{display:flex;align-items:center;gap:5px}.sw{display:inline-block;width:18px;height:8px;border-radius:4px}
+.sbar{display:flex;height:12px;border-radius:6px;overflow:hidden;margin:3px 0 8px}.sbar span{display:block;height:100%;border-right:2px solid var(--card)}
+.verdict{display:flex;gap:10px;align-items:flex-start;margin:6px 0}.badge{font-size:11px;font-weight:600;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.b-FAIL{background:#fcebeb;color:#791f1f}.b-PASS{background:#eaf3de;color:#27500a}.b-WATCH{background:#faeeda;color:#633806}.b-INFO{background:#e6f1fb;color:#0c447c}
+.layers{display:grid;gap:6px}.layer{display:grid;grid-template-columns:200px 96px 1fr;gap:10px;align-items:center;border:.5px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff}
+.ln{font-weight:600;font-size:12px}.ls{font-size:12px;font-weight:600;border:1.5px solid;border-radius:6px;padding:2px 6px;display:flex;gap:6px;align-items:center}.ls i{font-style:normal;color:#fff;border-radius:3px;width:16px;text-align:center;font-size:11px}.ld{font-size:11.5px;color:var(--ink2)}
+ul.f,ol.rec{margin:4px 0;padding-left:18px}ul.f li,ol.rec li{margin:3px 0}.note{font-size:10.5px;color:var(--muted);margin:4px 0 0}
+table.st td{padding:1.5px 5px;font-size:10px}
+.empty{color:var(--muted);font-style:italic;font-size:12px}
+@media print{body{background:#fff;font-size:10.5px}.wrap{max-width:none;padding:0}.page{break-after:page}.card{break-inside:avoid;padding:7px 9px;margin-bottom:6px}
+.kpis{margin-bottom:6px;gap:6px}.kpi{padding:5px 8px}.kpi .v{font-size:15px}h1{font-size:16px}h2{font-size:12.5px;margin-bottom:5px}table{font-size:9.5px}td{padding:2.5px 5px}
+.gmap{grid-template-columns:96mm 1fr}.ld{font-size:9.5px}.layer{padding:4px 8px;grid-template-columns:150px 80px 1fr}.ln,.ls{font-size:10px}table.st td{padding:1px 4px;font-size:8.6px}ul.f li,ol.rec li{margin:2px 0}}
+@media screen and (max-width:860px){.g2,.g3,.gmap,.kpis{grid-template-columns:1fr}.layer{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<!-- ======================= DATA: replace this JSON ======================= -->
+<script id="report-data" type="application/json">__REPORT_DATA__</script>
+
+<script>
+(function () {
+'use strict';
+const D = JSON.parse(document.getElementById('report-data').textContent);
+const C = {mob:'#2a78d6', wifi:'#eb6834', ink:'#0b0b0b', ink2:'#52514e', muted:'#898781', grid:'#e1e0d9'};
+const STATUS = {0:['Good','#0ca30c'],1:['Fair','#fab219'],2:['Poor','#ec835a'],3:['No internet','#d03b3b'],'-1':['No data','#b4b2a9']};
+const RATC = {NR_SA:['5G SA','#7f3fbf'],NR_NSA:['5G NSA','#6250d6'],LTE:['4G LTE','#1baf7a'],UMTS:['3G UMTS','#eda100'],HSPA:['3G HSPA','#e87ba4'],GSM:['2G','#8a5a00'],NONE:['No service','#d03b3b']};
+const PATHC = {cellular:C.mob, wifi:C.wifi};
+const TONE = {bad:'tone-bad', good:'tone-good', warn:'tone-warn'};
+const ST_ICON = {Good:'✓',Fair:'!',Poor:'▲',Failing:'✕','No data':'·'};
+const ST_COL = {Good:'#0ca30c',Fair:'#fab219',Poor:'#ec835a',Failing:'#d03b3b','No data':'#b4b2a9'};
+const tzms = (D.meta.tz_offset_min || 0) * 60000;
+
+// ---------- utils
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const hms = t => { const d = new Date(t + tzms); return pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()); };
+const hm = t => hms(t).slice(0, 5);
+const pct = (x, d = 0) => x == null || isNaN(x) ? '–' : (x * 100).toFixed(d) + '%';
+const msf = x => x == null || isNaN(x) ? '–' : Math.round(x) + ' ms';
+const num = (x, d = 1) => x == null || isNaN(x) ? '–' : Number(x).toFixed(d);
+const dur = s => s == null ? '–' : (s >= 60 ? Math.floor(s / 60) + ' min ' + pad(Math.round(s % 60)) + ' s' : Math.round(s) + ' s');
+const has = a => Array.isArray(a) && a.length > 0;
+const card = (title, body, cls = '') => `<div class="card ${cls}">${title ? `<h2>${esc(title)}</h2>` : ''}${body}</div>`;
+const empty = t => `<p class="empty">${esc(t || 'Not captured in this run.')}</p>`;
+const sw = (col, lab) => `<span><i class="sw" style="background:${col}"></i>${esc(lab)}</span>`;
+const T0 = D.meta.start_ms, T1 = D.meta.end_ms;
+
+// ---------- map (Web Mercator; optional raster basemap)
+function merc(lat, lon, z) { const n = 2 ** z; return [(lon + 180) / 360 * n, (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * n]; }
+function routeMap() {
+  const M = D.map || {}; const fx = (D.track && D.track.fixes) || [];
+  if (!fx.length) return empty('No location fixes in this run.');
+  let proj, W, H, bg = '';
+  const pts = fx.map(f => [f[0], f[1]]).concat((M.stations || []).filter(s => s.in_view !== false).map(s => [s.lat, s.lon]));
+  if (M.basemap && M.basemap.image) {
+    const b = M.basemap; W = b.crop[2]; H = b.crop[3];
+    proj = (la, lo) => { const [X, Y] = merc(la, lo, b.z); return [(X - b.x0) * 256 * b.scale - b.crop[0], (Y - b.y0) * 256 * b.scale - b.crop[1]]; };
+    bg = `<image href="${b.image}" width="${W}" height="${H}"/><rect width="${W}" height="${H}" fill="#fff" opacity=".3"/>`;
+  } else {
+    const z = 20, P = pts.map(p => merc(p[0], p[1], z));
+    let x0 = Math.min(...P.map(p => p[0])), x1 = Math.max(...P.map(p => p[0])), y0 = Math.min(...P.map(p => p[1])), y1 = Math.max(...P.map(p => p[1]));
+    W = 700; const sc = (W - 60) / Math.max(x1 - x0, 1e-9); H = Math.max(260, Math.min(900, (y1 - y0) * sc + 60));
+    const sc2 = Math.min(sc, (H - 60) / Math.max(y1 - y0, 1e-9));
+    proj = (la, lo) => { const [X, Y] = merc(la, lo, z); return [30 + (X - x0) * sc2, 30 + (Y - y0) * sc2]; };
+    bg = `<rect width="${W}" height="${H}" fill="#f3f1ea"/>`;
+  }
+  const o = [`<svg viewBox="0 0 ${W} ${H}" class="full" style="border-radius:8px">`, bg];
+  (M.rail_lines || []).forEach(ln => o.push(`<polyline points="${ln.map(p => proj(p[0], p[1]).map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#2c2c2a" stroke-width="1.8" stroke-dasharray="6 3"/>`));
+  const segs = [];
+  for (let i = 1; i < fx.length; i++) if (fx[i][3] - fx[i - 1][3] <= 120000) segs.push([proj(fx[i - 1][0], fx[i - 1][1]), proj(fx[i][0], fx[i][1]), fx[i]]);
+  segs.forEach(s => o.push(`<line x1="${s[0][0].toFixed(1)}" y1="${s[0][1].toFixed(1)}" x2="${s[1][0].toFixed(1)}" y2="${s[1][1].toFixed(1)}" stroke="#fff" stroke-width="7" stroke-linecap="round"/>`));
+  segs.forEach(s => o.push(`<line x1="${s[0][0].toFixed(1)}" y1="${s[0][1].toFixed(1)}" x2="${s[1][0].toFixed(1)}" y2="${s[1][1].toFixed(1)}" stroke="${STATUS[s[2][2]][1]}" stroke-width="4.2" stroke-linecap="round"><title>${hms(s[2][3])} · ${STATUS[s[2][2]][0]}</title></line>`));
+  fx.filter(f => f[4] > 200).forEach(f => { const [x, y] = proj(f[0], f[1]); o.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.4" fill="${STATUS[f[2]][1]}" stroke="#fff" stroke-width="1.2"><title>${hms(f[3])} · ${STATUS[f[2]][0]} · ±${Math.round(f[4])} m</title></circle>`); });
+  (M.gaps || []).forEach(g => { const [a, b] = [proj(...g.a), proj(...g.b)]; o.push(`<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${g.kind === 'unrecorded' ? '#d03b3b' : '#5f5e5a'}" stroke-width="2.2" stroke-dasharray="2 5" stroke-linecap="round"><title>${esc(g.label)}</title></line>`); });
+  (M.stations || []).forEach(s => { const [x, y] = proj(s.lat, s.lon); o.push(`<rect x="${(x - 6).toFixed(1)}" y="${(y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#0b0b0b" stroke-width="2" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})"><title>${esc(s.name)}</title></rect>`); });
+  (M.labels || []).forEach(l => { const [x, y] = proj(l.lat, l.lon); const tw = l.text.length * 6.2 + 12; const bx = l.anchor === 'end' ? x - 14 - tw : x + 12; const dy = l.dy || 0;
+    o.push(`<rect x="${bx.toFixed(1)}" y="${(y + dy - 12).toFixed(1)}" width="${tw.toFixed(1)}" height="18" rx="4" fill="#fff" stroke="#2c2c2a" stroke-width=".6"/><text x="${(bx + 6).toFixed(1)}" y="${(y + dy + 1.5).toFixed(1)}" font-size="11" fill="#0b0b0b">${esc(l.text)}</text>`); });
+  // scale bar
+  const la = fx[Math.floor(fx.length / 2)][0], [ax] = proj(la, 0), [bx2] = proj(la, 0.1);
+  const mpp = (0.1 * 111320 * Math.cos(la * Math.PI / 180)) / Math.abs(bx2 - ax); const tgt = mpp * W * 0.16; const e = 10 ** Math.floor(Math.log10(tgt));
+  const nice = [5, 2, 1].map(m => m * e).find(v => v <= tgt) || e; const Lp = nice / mpp; const lab = nice >= 1000 ? (nice / 1000) + ' km' : nice + ' m';
+  o.push(`<g transform="translate(${(W - Lp - 22).toFixed(1)},${H - 20})"><rect x="-8" y="-17" width="${(Lp + 16).toFixed(1)}" height="27" rx="4" fill="#fff" opacity=".92"/><line x1="0" x2="${Lp.toFixed(1)}" y1="0" y2="0" stroke="#2c2c2a" stroke-width="2.5"/><text x="${(Lp / 2).toFixed(1)}" y="-6" font-size="11" text-anchor="middle" fill="#2c2c2a">${lab}</text></g>`);
+  if (M.attribution) o.push(`<text x="8" y="${H - 6}" font-size="9.5" fill="#2c2c2a">${esc(M.attribution)}</text>`);
+  o.push('</svg>');
+  return o.join('');
+}
+
+// ---------- full-run multi-lane timeline
+function timeline() {
+  const W = 1120, ml = 118, mr = 14; const X = t => ml + (t - T0) / (T1 - T0) * (W - ml - mr);
+  let y = 22; const o = [];
+  const lane = (title, h, sub) => { const top = y; o.push(`<text x="8" y="${(top + h / 2 + 4).toFixed(1)}" font-size="11" font-weight="600" fill="${C.ink}">${esc(title)}</text>`);
+    if (sub) o.push(`<text x="8" y="${(top + h / 2 + 17).toFixed(1)}" font-size="9.5" fill="${C.muted}">${esc(sub)}</text>`);
+    o.push(`<line x1="${ml}" x2="${W - mr}" y1="${top + h + 5}" y2="${top + h + 5}" stroke="${C.grid}"/>`); y += h + 12; return top; };
+  // hour/quarter ticks
+  const q = 15 * 60000; for (let t = Math.ceil((T0 + tzms) / q) * q - tzms; t <= T1; t += q)
+    o.push(`<line x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="14" y2="__B__" stroke="${C.grid}" stroke-dasharray="2 3"/><text x="${X(t).toFixed(1)}" y="11" font-size="10" text-anchor="middle" fill="${C.ink2}">${hm(t)}</text>`);
+  // active path
+  if (has(D.segments)) { const t = lane('Active path', 16); D.segments.forEach(s => {
+    const x = X(s.start), w = Math.max(X(s.end) - x, 1); o.push(`<rect x="${x.toFixed(1)}" y="${t}" width="${w.toFixed(1)}" height="16" fill="${PATHC[s.kind] || '#888'}"/>`);
+    if (w > 120) o.push(`<text x="${(x + w / 2).toFixed(1)}" y="${t + 12}" font-size="10.5" text-anchor="middle" fill="#fff">${esc(s.label)}</text>`); }); }
+  // health
+  if (D.health_bins && has(D.health_bins.codes)) { const t = lane('Health', 20, 'active path, ' + Math.round(D.health_bins.bin_ms / 1000) + ' s'); const bw = (W - ml - mr) * D.health_bins.bin_ms / (T1 - T0);
+    D.health_bins.codes.forEach((c, i) => { const tt = D.health_bins.t0 + i * D.health_bins.bin_ms; if (tt <= T1) o.push(`<rect x="${X(tt).toFixed(2)}" y="${t}" width="${(bw + .3).toFixed(2)}" height="20" fill="${STATUS[c][1]}"><title>${hms(tt)} · ${STATUS[c][0]}</title></rect>`); }); }
+  // RAT
+  if (has(D.rat)) { const t = lane('Mobile RAT', 14, D.meta.mobile_operator || ''); D.rat.forEach(r => { const c = (RATC[r.rat] || [r.rat, '#888'])[1];
+    o.push(`<rect x="${X(r.t).toFixed(2)}" y="${t}" width="${Math.max(X(r.t + r.dur) - X(r.t), .4).toFixed(2)}" height="14" fill="${c}"><title>${hms(r.t)} · ${(RATC[r.rat] || [r.rat])[0]}</title></rect>`); }); }
+  // connect time
+  const cs = D.connect_series || {}; if (Object.keys(cs).some(k => has(cs[k]))) { const h = 92, t = lane('Connect time', h, 'median / 30 s, log'); const lo = 10, hi = 3000;
+    const Y = v => t + h - (Math.log10(Math.min(Math.max(v, lo), hi)) - 1) / (Math.log10(hi) - 1) * h;
+    [10, 100, 1000].forEach(v => o.push(`<line x1="${ml}" x2="${W - mr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="${C.grid}"/><text x="${ml - 4}" y="${(Y(v) + 3).toFixed(1)}" font-size="9" text-anchor="end" fill="${C.muted}">${v}</text>`));
+    Object.keys(cs).forEach(k => { let seg = [], prev = null; const flush = () => { if (seg.length > 1) o.push(`<polyline points="${seg.join(' ')}" fill="none" stroke="${PATHC[k]}" stroke-width="1.6"${k === 'wifi' ? ' stroke-dasharray="4 2"' : ''}/>`); seg = []; };
+      cs[k].forEach(([tt, v]) => { if (prev !== null && tt - prev > 90000) flush(); seg.push(X(tt).toFixed(1) + ',' + Y(v).toFixed(1)); prev = tt; }); flush(); }); }
+  // failures
+  const fl = D.failures || {}; if (Object.keys(fl).some(k => has(fl[k]))) { const h = 34, t = lane('Failed checks', h, 'per min, by path');
+    Object.keys(fl).forEach((k, j) => fl[k].forEach(([tt, n]) => { const hh = Math.min(n, 20) / 20 * h; o.push(`<rect x="${(X(tt) + j * 2.6).toFixed(1)}" y="${(t + h - hh).toFixed(1)}" width="2.4" height="${hh.toFixed(1)}" fill="${PATHC[k]}"><title>${hm(tt)} · ${n} failed on ${k}</title></rect>`); })); }
+  // stalls
+  if (has(D.stalls) || has(D.mobile_drops)) { const h = 34, t = lane('Wi-Fi stalls', h, 'bar = duration');
+    (D.stalls || []).forEach(s => o.push(`<rect x="${X(s.t).toFixed(1)}" y="${t + 4}" width="${Math.max(X(s.t + s.dur * 1000) - X(s.t), 1.2).toFixed(1)}" height="${h - 8}" fill="#d03b3b" opacity=".85"><title>${hms(s.t)} · stall ${Math.round(s.dur)} s</title></rect>`));
+    (D.mobile_drops || []).forEach(tt => o.push(`<rect x="${X(tt).toFixed(1)}" y="${t + h - 6}" width="2" height="6" fill="${C.mob}"><title>${hms(tt)} · mobile data drop</title></rect>`)); }
+  // throughput
+  if (has(D.throughput)) { const h = 60, t = lane('Throughput', h, 'Mbps, log'); const Y = v => t + h - (Math.log10(Math.min(Math.max(v, .1), 300)) + 1) / (Math.log10(300) + 1) * h;
+    [1, 10, 100].forEach(v => o.push(`<line x1="${ml}" x2="${W - mr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="${C.grid}"/><text x="${ml - 4}" y="${(Y(v) + 3).toFixed(1)}" font-size="9" text-anchor="end" fill="${C.muted}">${v}</text>`));
+    D.throughput.forEach(r => { const v = r.ok && r.mbps != null ? r.mbps : .1, x = X(r.t), yy = Y(v), c = PATHC[r.path];
+      o.push(`<g><title>${hms(r.t)} · ${r.path} · ${num(v)} Mbps</title>${r.path === 'cellular' ? `<circle cx="${x.toFixed(1)}" cy="${yy.toFixed(1)}" r="3.3" fill="${c}" stroke="#fff"/>` : `<rect x="${(x - 3).toFixed(1)}" y="${(yy - 3).toFixed(1)}" width="6" height="6" fill="${c}" stroke="#fff" transform="rotate(45 ${x.toFixed(1)} ${yy.toFixed(1)})"/>`}</g>`); }); }
+  // location
+  if (has(D.fixes_per_min)) { const h = 26, t = lane('Location fixes', h, 'per min; red = none'); const wdt = X(T0 + 60000) - X(T0) - .6;
+    const byMin = new Map(D.fixes_per_min.map(r => [Math.floor((r[0] - T0) / 60000), r]));
+    for (let b = 0; b <= Math.floor((T1 - T0) / 60000); b++) { const x = X(T0 + b * 60000); const r = byMin.get(b);
+      if (r) { const hh = Math.min(r[1], 60) / 60 * h; o.push(`<rect x="${x.toFixed(1)}" y="${(t + h - hh).toFixed(1)}" width="${wdt.toFixed(1)}" height="${hh.toFixed(1)}" fill="${r[2] <= 60 ? '#1c5fb0' : '#86b4ec'}"><title>${hm(T0 + b * 60000)} · ${r[1]} fixes · ±${Math.round(r[2])} m</title></rect>`); }
+      else o.push(`<rect x="${x.toFixed(1)}" y="${t + h - 4}" width="${wdt.toFixed(1)}" height="4" fill="#d03b3b"/>`); } }
+  return `<svg viewBox="0 0 ${W} ${y + 4}" class="full">${o.join('').replace(/__B__/g, y)}</svg>`;
+}
+
+// ---------- components
+const statusBar = (sh, keys, colors) => '<div class="sbar">' + keys.filter(k => (sh[k] || 0) > .003).map(k => `<span style="width:${(sh[k] * 100).toFixed(2)}%;background:${colors(k)}" title="${esc(k)} ${(sh[k] * 100).toFixed(0)}%"></span>`).join('') + '</div>';
+function hbar(items, unit, fmt = v => num(v, 1), w = 340) { const max = Math.max(...items.map(i => i.v || 0), 1e-9); const rh = 22;
+  return `<svg viewBox="0 0 ${w} ${items.length * rh + 6}" class="full">` + items.map((it, i) => { const y = i * rh + 4, bw = it.v == null ? 0 : Math.max(it.v / max * (w - 190), 1);
+    return `<text x="0" y="${y + 13}" font-size="10.5" fill="${C.ink}">${esc(it.label)}</text><rect x="130" y="${y + 3}" width="${bw.toFixed(1)}" height="13" rx="2" fill="${it.color}"/><text x="${(134 + bw).toFixed(1)}" y="${y + 13}" font-size="10.5" fill="${C.ink2}">${it.v == null ? '–' : fmt(it.v)}${unit}</text>`; }).join('') + '</svg>'; }
+
+function kpis() { return '<div class="kpis">' + (D.kpis || []).map(k => `<div class="kpi"><div class="l">${esc(k.label)}</div><div class="v ${TONE[k.tone] || ''}">${esc(k.value)}</div><div class="s">${esc(k.sub || '')}</div></div>`).join('') + '</div>'; }
+function verdicts() { return (D.paths || []).filter(p => p.verdict).map(p => `<div class="verdict"><span class="badge b-${p.verdict}">${p.verdict}</span><div><b>${esc(p.label)}</b>: ${esc(p.verdict_text)}</div></div>`).join(''); }
+function layers() { if (!has(D.wifi_layers)) return empty('No Wi-Fi connection during this run.');
+  return '<div class="layers">' + D.wifi_layers.map(l => `<div class="layer"><div class="ln">${esc(l.name)}</div><div class="ls" style="border-color:${ST_COL[l.status]}"><i style="background:${ST_COL[l.status]}">${ST_ICON[l.status]}</i>${esc(l.status)}</div><div class="ld">${esc(l.detail)}</div></div>`).join('') + '</div>'; }
+function cmpTable() { const P = D.paths || []; if (!P.length) return empty();
+  const row = (lab, f) => `<tr><td>${lab}</td>${P.map(p => `<td class="n">${f(p)}</td>`).join('')}</tr>`;
+  return `<table class="cmp"><tr><th>Metric</th>${P.map(p => `<th class="n">${esc(p.label)}</th>`).join('')}</tr>` + [
+    row('Duration', p => Math.round((p.window[1] - p.window[0]) / 60000) + ' min'),
+    row('HTTPS checks', p => (p.stats.n || 0).toLocaleString()),
+    row('<b>Success rate</b>', p => `<b>${pct(p.stats.sr, 1)}</b>`),
+    row('DNS lookup (median)', p => msf(p.stats.dns)), row('TCP connect (median)', p => msf(p.stats.con)),
+    row('TLS handshake (median)', p => msf(p.stats.tls)), row('Time to first byte (median)', p => msf(p.stats.ttfb)),
+    row('<b>Total request (median / p95)</b>', p => `<b>${Math.round(p.stats.tot)}</b> / ${Math.round(p.stats.p95)} ms`),
+    row('<b>Throughput median</b> (min–max)', p => p.thr && p.thr.n ? `<b>${num(p.thr.median)}</b> (${num(p.thr.min)}–${Math.round(p.thr.max)}) Mbps · n=${p.thr.n}` : '–'),
+    row('Resolver', p => p.resolver ? `${num(p.resolver.median_ms)} ms · ${esc(p.resolver.label)}` : '–'),
+    row('Gateway', p => p.gateway ? (p.gateway.sr > 0 ? `${pct(p.gateway.sr)} · ${num(p.gateway.median_ms)} ms` : `${pct(p.gateway.sr)} · ${esc(p.gateway.note || '')}`) : '–'),
+    row('Health: Good / Fair / Poor / None', p => p.health ? [0, 1, 2, 3].map(k => pct(p.health[k])).join(' / ') : 'not scored (not active path)')
+  ].join('') + '</table>'; }
+function epTable() { if (!has(D.endpoints)) return empty(); const [a, b] = D.endpoint_paths || ['A', 'B'];
+  return `<table><tr><th>Endpoint</th><th class="n">${esc(a)} · success</th><th class="n">connect</th><th class="n">total</th><th class="n">${esc(b)} · success</th><th class="n">connect</th><th class="n">total p95</th></tr>` +
+    D.endpoints.map(e => `<tr><td>${esc(e.host)}</td><td class="n">${e.a ? pct(e.a.sr, 1) : '–'}</td><td class="n">${e.a ? msf(e.a.con) : '–'}</td><td class="n">${e.a ? msf(e.a.tot) : '–'}</td><td class="n">${e.b ? pct(e.b.sr, 1) : '–'}</td><td class="n">${e.b ? msf(e.b.con) : '–'}</td><td class="n">${e.b ? msf(e.b.p95) : '–'}</td></tr>`).join('') + '</table>'; }
+function ratCard() { if (!D.rat_share || !Object.keys(D.rat_share).length) return empty('No radio data.');
+  const keys = Object.keys(RATC); return Object.entries(D.rat_share).map(([leg, v]) => `<h3>${esc(leg)} · ${Math.round(v.minutes)} min · ${v.changes} changes</h3>` + statusBar(v.share, keys, k => RATC[k][1])).join('') +
+    `<div class="legend">${keys.filter(k => Object.values(D.rat_share).some(v => (v.share[k] || 0) > 0)).map(k => sw(RATC[k][1], RATC[k][0])).join('')}</div>` + (D.rat_note ? `<p class="note">${esc(D.rat_note)}</p>` : ''); }
+function phaseTable() { if (!has(D.phases)) return empty('No Wi-Fi stalls.');
+  return '<table><tr><th>Phase</th><th>Time</th><th class="n">Stalls</th><th class="n">No internet</th><th class="n">Share</th></tr>' + D.phases.map(p => `<tr><td>${esc(p.label)}</td><td>${hm(p.start)}–${hm(p.end)}</td><td class="n">${p.stalls}</td><td class="n">${dur(p.stall_s)}</td><td class="n">${pct(p.stall_s / Math.max((p.end - p.start) / 1000, 1))}</td></tr>`).join('') + '</table>'; }
+function stallHist() { if (!has(D.stalls)) return empty('No Wi-Fi stalls.'); const bins = [[0, 5, '<5 s'], [5, 10, '5–10 s'], [10, 30, '10–30 s'], [30, 60, '30–60 s'], [60, 120, '1–2 min'], [120, 1e9, '>2 min']];
+  const d = D.stalls.map(s => s.dur).sort((a, b) => a - b); const med = d[Math.floor(d.length / 2)];
+  return hbar(bins.map(([a, b, l]) => ({label: l, v: D.stalls.filter(s => s.dur >= a && s.dur < b).length, color: '#d03b3b'})), ' stalls', v => v.toFixed(0)) +
+    `<p class="note">Median ${num(med)} s · mean ${Math.round(d.reduce((x, y) => x + y, 0) / d.length)} s · longest ${Math.round(d[d.length - 1])} s.</p>`; }
+function thrCard() { const P = (D.paths || []).filter(p => p.thr && p.thr.n); if (!P.length) return empty('No throughput tests.');
+  return hbar(P.map(p => ({label: p.short || p.label, v: p.thr.median, color: PATHC[p.kind]})), ' Mbps') + `<p class="note">${P.map(p => `${esc(p.short || p.label)}: n=${p.thr.n}, ${p.thr.under1} under 1 Mbps, max ${Math.round(p.thr.max)} Mbps`).join(' · ')}</p>`; }
+function qualityTable() { if (!has(D.quality)) return empty();
+  return '<table><tr><th>Collector</th><th class="n">Captured</th><th>Notes</th></tr>' + D.quality.map(q => `<tr><td>${esc(q.collector)}</td><td class="n">${q.captured == null ? '—' : pct(q.captured)}</td><td>${esc(q.note || '')}</td></tr>`).join('') + '</table>'; }
+function recs() { const R = D.recommendations || {}; return Object.entries(R).map(([k, items]) => `<h3>${esc(k)}</h3><ol class="rec">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ol>`).join('') || empty(); }
+function stallAppendix() { if (!has(D.stalls)) return ''; const head = '<table class="st"><tr><th class="n">#</th><th>Time</th><th>Ph</th><th class="n">Duration</th><th>Location</th><th class="n">Lat, lon</th></tr>';
+  const rows = D.stalls.map((s, i) => `<tr><td class="n">${i + 1}</td><td>${hms(s.t)}</td><td>${esc(s.phase || '')}</td><td class="n">${dur(s.dur)}</td><td>${esc(s.conf || '')}</td><td class="n">${s.lat != null ? s.lat.toFixed(4) + ', ' + s.lon.toFixed(4) : '–'}</td></tr>`);
+  const n = Math.ceil(rows.length / 3); const cols = [0, 1, 2].map(c => rows.slice(c * n, (c + 1) * n)).filter(c => c.length);
+  return `<h2 style="margin-top:6px">Appendix: all ${rows.length} Wi-Fi stalls</h2><div class="g3">${cols.map(c => `<div class="card">${head}${c.join('')}</table></div>`).join('')}</div>`; }
+
+const legStatus = [0, 1, 2, 3, -1].map(k => sw(STATUS[k][1], STATUS[k][0])).join('');
+const legRat = Object.keys(RATC).filter(k => (D.rat || []).some(r => r.rat === k)).map(k => sw(RATC[k][1], RATC[k][0])).join('');
+const m = D.meta;
+
+document.title = m.title || document.title;
+document.getElementById('app').innerHTML = `
+<div class="page">
+  <div class="eyebrow">Network test report · Tracer ${esc(m.platform)} run ${esc(m.run_id_short)} · ${esc(m.device)} · ${esc(m.os)} · Tracer ${esc(m.app_version)}</div>
+  <h1>${esc(m.title)}</h1>
+  <p class="sub">${esc(m.scope)}</p>
+  ${kpis()}
+  <div class="gmap">
+    ${card('Route coloured by network health (active path)', routeMap() + `<div class="legend">${legStatus}${has((D.map || {}).rail_lines) ? '<span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" stroke="#2c2c2a" stroke-width="2" stroke-dasharray="6 3"/></svg>Rail track</span>' : ''}<span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" stroke="#d03b3b" stroke-width="2" stroke-dasharray="2 4"/></svg>Not located</span></div>`)}
+    <div>${card('Verdict', verdicts())}${card('Key findings', '<ul class="f">' + (D.findings || []).map(f => `<li>${f}</li>`).join('') + '</ul>')}</div>
+  </div>
+</div>
+<div class="page">
+  ${card('Full-run timeline: every signal on one time axis', timeline() + `<div class="legend">${sw(C.mob, 'Mobile (circles)')}${sw(C.wifi, 'Wi-Fi (dashed, diamonds)')}${legStatus}${legRat}${sw('#1c5fb0', 'GPS fixes')}${sw('#86b4ec', 'approx. fixes')}</div><p class="note">Connect time is the TCP handshake to each HTTPS endpoint (≈ network round trip), shown as a 30-second median per path. Health is scored on the active path: Good = all checks succeed and connect under 150 ms; Fair ≥80% and under 400 ms; Poor = slower or 50–80%; No internet = under 50% or inside a stall.</p>`)}
+</div>
+<div class="page">
+  <div class="g2">${card('Wi-Fi: layer-by-layer diagnosis', layers())}${card('Path comparison', cmpTable())}</div>
+  <div class="g2">${card('Per-endpoint results', epTable() + (D.endpoint_note ? `<p class="note">${esc(D.endpoint_note)}</p>` : ''))}${card('Mobile radio technology', ratCard())}</div>
+</div>
+<div class="page">
+  <div class="g3">${card('Wi-Fi stalls by phase', phaseTable() + '<p class="note">Stall = 3 consecutive failed checks on all endpoints while still associated.</p>')}${card('Stall durations', stallHist())}${card('Throughput tests', thrCard())}</div>
+  <div class="g2">${card('Test quality and coverage', qualityTable())}${card('Recommendations', recs())}</div>
+</div>
+<div>${stallAppendix()}<p class="note">${esc(m.source_note || '')}</p></div>`;
+})();
+</script>
+</body>
+</html>

@@ -375,7 +375,7 @@ private fun shareFiles(context: Context, req: ShareRequest) {
     } else {
         Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
     }
-    send.setType("application/zip").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    send.setType("application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     context.startActivity(
         Intent.createChooser(send, context.getString(R.string.share_chooser)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
     )

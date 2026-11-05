@@ -7,27 +7,16 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
-import android.util.Log
 import androidx.core.content.FileProvider
 import app.tracer.core.model.RunRecord
-import app.tracer.core.report.Comparison
 import app.tracer.core.report.Metric
-import app.tracer.core.report.ReportJson
 import app.tracer.core.report.TestReport
 import app.tracer.core.report.fmtClock
 import app.tracer.core.runtime.BundleService
-import app.tracer.core.runtime.RunRepository
-import app.tracer.ui.report.ReportRepository
+import app.tracer.ui.report.ReportV1Service
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,48 +26,23 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 
 /**
- * Builds the share items (PDF report, summary JSON with comparison, full-data ZIP) and delivers
- * them: Downloads folder, email composer, share sheet. Shared by the Share screen and the
- * automatic email step after each test.
+ * Builds the one export, the Tracer report v1 PDF, and delivers it: Downloads folder, email composer, share sheet.
+ * Nothing else leaves the phone (no HTML, ZIP or summary files); the raw run stays in the local database so the
+ * report can be regenerated. Shared by the Share screen and the email step after each test.
  */
 @Singleton
 class ShareFiles @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val reports: ReportRepository,
-    private val runs: RunRepository,
     private val bundles: BundleService,
+    private val reportV1: ReportV1Service,
 ) {
     val authority: String get() = bundles.fileProviderAuthority
 
-    /** Writes the selected items into cacheDir/exports/share-<runId>/ (covered by the export FileProvider). */
-    suspend fun prepare(
-        run: RunRecord, r: TestReport, pdf: Boolean, summary: Boolean, zip: Boolean,
-        status: (String, Float?) -> Unit = { _, _ -> },
-    ): List<File> {
+    /** Writes the report PDF into cacheDir/exports/share-<runId>/ (covered by the export FileProvider). Cancel the caller to stop. */
+    suspend fun preparePdf(run: RunRecord, status: (String, Float?) -> Unit = { _, _ -> }): File {
         val dir = File(context.cacheDir, "exports/share-${safe(run.runId)}")
         withContext(Dispatchers.IO) { dir.deleteRecursively(); dir.mkdirs() }
-        val base = ReportPdf.baseName(run, run.runId)
-        val out = mutableListOf<File>()
-        if (pdf) {
-            status("Making the report…", null)
-            val f = File(dir, ReportPdf.fileName(run, run.runId))
-            withContext(Dispatchers.Default) { ReportPdf.write(r, run, f) }
-            out += f
-        }
-        if (summary) {
-            status("Writing the summary…", null)
-            val compare = runCatching { compareJson(run, r) }.onFailure { Log.w(TAG, "comparison failed", it) }.getOrNull()
-            val obj = ReportJson.encode(r).let { if (compare != null) JsonObject(it + ("compare" to compare)) else it }
-            val f = File(dir, "${base}_summary.json")
-            withContext(Dispatchers.IO) { f.writeText(PRETTY.encodeToString(JsonObject.serializer(), obj)) }
-            out += f
-        }
-        if (zip) {
-            status("Packing the full data…", 0f)
-            out += bundles.export(run.runId) { p -> status("Packing the full data…", p.coerceIn(0f, 1f)) }
-        }
-        status("Ready", null)
-        return out
+        return reportV1.pdf(run, dir) { s, p -> status(s, p) }
     }
 
     /**
@@ -156,53 +120,19 @@ class ShareFiles @Inject constructor(
             }
             if (r.moments.size > 20) appendLine("  … ${r.moments.size - 20} more in the report")
         }
-        appendLine()
-        appendLine("Attached: ${files.joinToString { it.name }}")
-        if (note != null) appendLine(note)
+        if (note != null) { appendLine(); appendLine(note) }
         r.methodFingerprint?.let { appendLine("Method $it") }
+        appendLine()
+        append("Attached: network test report (PDF).")
     }
 
     private fun StringBuilder.line(label: String, v: Double?, unit: String, verdict: String) {
         if (v != null) appendLine("$label ${v.roundToInt().toString().replace('-', '−')} $unit ($verdict)")
     }
 
-    /** Comparison vs the earliest earlier test at the same site, if any. */
-    private suspend fun compareJson(run: RunRecord, r: TestReport): JsonObject? {
-        val site = run.site ?: return null
-        val candidates = runs.observeRuns().first().map { it.run }
-            .filter { it.site.equals(site, ignoreCase = true) && it.runId != run.runId && it.endedAt != null && it.startedAt < run.startedAt }
-        val older = reports.reports(candidates).minByOrNull { it.first.startedAt } ?: return null
-        fun label(x: RunRecord) = x.testNumber?.let { "Test $it" } ?: x.name
-        val c = Comparison(r, older.second, label(run), label(older.first))
-        return buildJsonObject {
-            put("newer", c.newerLabel)
-            put("older", c.olderLabel)
-            put("older_run_id", older.first.runId)
-            put("checks_passed_before", c.checksBefore)
-            put("checks_passed_after", c.checksAfter)
-            put("improved", c.improved)
-            put("deltas", buildJsonArray { c.deltas.forEach { add(it) } })
-            put("changes", buildJsonArray {
-                c.changes.forEach { d ->
-                    add(buildJsonObject {
-                        put("metric", d.metric.name.lowercase())
-                        put("before", d.before)
-                        put("after", d.after)
-                        put("higher_is_better", d.metric.higherIsBetter)
-                        put("better", d.better)
-                        put("text", d.text)
-                    })
-                }
-            })
-        }
-    }
-
     companion object {
         private const val TAG = "ShareFiles"
         const val FOLDER = "Tracer"
-        /** Keep total attachments under typical Exchange/Gmail limits (20–25 MB incl. base64 overhead). */
-        const val MAX_EMAIL_BYTES = 17L * 1024 * 1024
-        private val PRETTY = Json { prettyPrint = true }
         private val DATE = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT)
         fun safe(s: String) = s.replace(Regex("[^A-Za-z0-9_-]+"), "_")
     }

@@ -54,7 +54,6 @@ import app.tracer.ui.signals.WifiDetailScreen
 import app.tracer.ui.summary.TestSummaryScreen
 import app.tracer.ui.tests.TestsScreen
 import app.tracer.ui.theme.TType
-import app.tracer.ui.transfer.TransferScreen
 import app.tracer.ui.welcome.WelcomeScreen
 import app.tracer.ui.worst.WorstSegmentsRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -257,7 +256,8 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
             composable(Routes.LIBRARY) {
                 RunLibraryScreen(
                     onOpenRun = { id -> nav.navigate(Routes.replay(id)) },
-                    onExport = { id -> nav.navigate(Routes.transfer(id)) },
+                    // the export is the report PDF only (the raw bundle stays on the phone)
+                    onExport = { id -> nav.navigate(Routes.share(id)) },
                     onOpenLive = goLive,
                 )
             }
@@ -284,7 +284,8 @@ fun TracerNavHost(startOnLive: Boolean, openLiveSignal: Int = 0, viewModel: NavV
                 )
             }
             composable(Routes.TRANSFER, arguments = listOf(navArgument("runId") { type = NavType.StringType })) { e ->
-                TransferScreen(runId = e.arguments?.getString("runId").orEmpty(), onBack = { nav.popBackStack() })
+                // bundle export retired: the only export is the report PDF
+                ShareScreen(runId = e.arguments?.getString("runId").orEmpty(), onCancel = { nav.popBackStack() })
             }
             composable(Routes.PHONE_SETUP) { PhoneSetupScreen(onBack = { nav.popBackStack() }) }
         }

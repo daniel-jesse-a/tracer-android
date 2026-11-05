@@ -20,6 +20,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Rail overlay asset (internal; from secret, never committed)
+        env: { RAIL_ERGT_JSON_B64: "${{ secrets.RAIL_ERGT_JSON_B64 }}" }
+        run: |
+          if [ -n "$RAIL_ERGT_JSON_B64" ]; then echo "$RAIL_ERGT_JSON_B64" | base64 -d > ui/src/main/assets/report/rail_ergt.json; echo "rail asset written"; else echo "no RAIL_ERGT_JSON_B64 secret: report map without the rail overlay"; fi
       - name: Assemble debug APK
         run: ./gradlew --no-configuration-cache --stacktrace --continue :app:assembleDebug 2>&1 | tee build-log.txt; exit ${PIPESTATUS[0]}
       - name: Upload build log
@@ -59,8 +63,23 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Rail overlay asset (internal; from secret, never committed)
+        env: { RAIL_ERGT_JSON_B64: "${{ secrets.RAIL_ERGT_JSON_B64 }}" }
+        run: |
+          if [ -n "$RAIL_ERGT_JSON_B64" ]; then echo "$RAIL_ERGT_JSON_B64" | base64 -d > ui/src/main/assets/report/rail_ergt.json; echo "rail asset written"; else echo "no RAIL_ERGT_JSON_B64 secret: report map without the rail overlay"; fi
       - name: Unit tests
         run: ./gradlew --no-configuration-cache --continue testDebugUnitTest :core:test :events:test 2>&1 | tee test-log.txt; exit ${PIPESTATUS[0]}
+      - name: Sample report PDF (Kotlin builder → template → headless Chrome)
+        if: always()
+        run: |
+          test -f ui/build/report-sample/report.html || ./gradlew --no-configuration-cache :ui:testDebugUnitTest --tests 'app.tracer.ui.report.ReportDataBuilderTest'
+          mkdir -p dist
+          google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer --print-to-pdf="$PWD/dist/Tracer_report_sample.pdf" "file://$PWD/ui/build/report-sample/report.html"
+          python3 -c "import re,sys; d=open('dist/Tracer_report_sample.pdf','rb').read(); n=len(re.findall(rb'/Type\s*/Page[^s]', d)); print('pages:', n); sys.exit(0 if n == 5 else 1)"
+      - name: Upload sample report PDF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: tracer-report-sample-pdf, path: dist/Tracer_report_sample.pdf, if-no-files-found: error }
       - name: Lint
         if: always()
         run: ./gradlew --no-configuration-cache --continue lintDebug 2>&1 | tee lint-log.txt; exit ${PIPESTATUS[0]}

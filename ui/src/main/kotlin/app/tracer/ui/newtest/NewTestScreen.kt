@@ -31,6 +31,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -163,6 +168,21 @@ fun NewTestScreen(
                     }
                     val n = testNumber
                     if (setup.siteOrNull != null && n != null) Text("Test $n", style = TType.bodyRegular, color = tc.text3)
+                }
+            }
+
+            if (vm.stations.isNotEmpty()) {
+                Spacer(Modifier.height(K.gap))
+                var open by remember { mutableStateOf(false) }
+                Card(padding = PaddingValues(horizontal = 18.dp, vertical = 0.dp), onClick = { open = true }) {
+                    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Destination", style = TType.bodyRegular, color = tc.text3, modifier = Modifier.weight(1f))
+                        Text(setup.destination ?: "Nearest at the end", style = TType.body.copy(fontWeight = FontWeight.SemiBold), color = tc.text)
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            DropdownMenuItem(text = { Text("Nearest at the end") }, onClick = { vm.setDestination(null); open = false })
+                            vm.stations.forEach { st -> DropdownMenuItem(text = { Text(st) }, onClick = { vm.setDestination(st); open = false }) }
+                        }
+                    }
                 }
             }
 

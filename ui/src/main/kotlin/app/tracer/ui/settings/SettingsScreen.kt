@@ -98,7 +98,7 @@ fun SettingsScreen(
     val linked by viewModel.linkedDevices.collectAsStateWithLifecycle()
     val autoEmail by viewModel.autoEmail.collectAsStateWithLifecycle()
     val recipients by viewModel.emailRecipients.collectAsStateWithLifecycle()
-    val emailZip by viewModel.emailZip.collectAsStateWithLifecycle()
+    val tileProvider by viewModel.reportTileProvider.collectAsStateWithLifecycle()
 
     var picker by remember { mutableStateOf<PickerSpec?>(null) }
     var number by remember { mutableStateOf<NumberSpec?>(null) }
@@ -166,9 +166,20 @@ fun SettingsScreen(
                         viewModel.setEmailRecipients(v.split(',', ';', ' ', '\n').map { it.trim() }.filter { it.contains('@') })
                     }
                 })
-                Sep()
-                ToggleRow("Attach full data", "ZIP for engineers, when under 17 MB", emailZip) { viewModel.setEmailZip(it) }
             }
+            Text("Each test is sent as one PDF report. The raw data stays on this phone.", style = TType.footnote.copy(fontSize = 13.sp),
+                color = tc.text3, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp))
+
+            Caption("Report map")
+            Group {
+                val providers = app.tracer.ui.report.ReportMap.TILE_PROVIDERS
+                val pi = providers.indexOfFirst { it.id == tileProvider }.coerceAtLeast(0)
+                ListRow("Basemap", providers[pi].name, onClick = {
+                    picker = PickerSpec("Report basemap", providers.map { it.name }, pi) { i -> viewModel.setReportTileProvider(providers[i].id) }
+                })
+            }
+            Text("Map tiles are fetched only when online at export time; the provider's credit is printed on the map. Offline, the route is drawn on a plain background.",
+                style = TType.footnote.copy(fontSize = 13.sp), color = tc.text3, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp))
 
             Caption("Companions")
             Group {

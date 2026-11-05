@@ -15,7 +15,9 @@ import app.tracer.ui.summary.ReportState
 import app.tracer.ui.summary.ReportViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,22 +31,17 @@ import javax.inject.Inject
 enum class ShareDest { DOWNLOAD, EMAIL, SHARE, FILES, SERVER }
 
 data class ShareUi(
-    val pdf: Boolean = true,
-    val summary: Boolean = true,
-    val zip: Boolean = false,
     val dest: ShareDest = ShareDest.DOWNLOAD,
     val recipients: List<String> = emptyList(),
     /** null = no server configured (Settings › Upload URL) */
     val uploadUrl: String? = null,
     val busy: Boolean = false,
     val status: String? = null,
-    /** 0..1 while the ZIP is being built */
+    /** 0..1 while the report PDF is being built */
     val progress: Float? = null,
     val result: String? = null,
     val failed: Boolean = false,
-) {
-    val count: Int get() = listOf(pdf, summary, zip).count { it }
-}
+)
 
 @HiltViewModel
 class ShareViewModel @Inject constructor(
@@ -77,9 +74,9 @@ class ShareViewModel @Inject constructor(
         viewModelScope.launch { settings.emailRecipients.collect { to -> _ui.update { it.copy(recipients = to) } } }
     }
 
-    fun togglePdf() = _ui.update { if (it.busy) it else it.copy(pdf = !it.pdf, result = null) }
-    fun toggleSummary() = _ui.update { if (it.busy) it else it.copy(summary = !it.summary, result = null) }
-    fun toggleZip() = _ui.update { if (it.busy) it else it.copy(zip = !it.zip, result = null) }
+    private var running: Job? = null
+    /** Stops building the report (Cancel under the progress bar). */
+    fun cancel() { running?.cancel() }
     fun setDest(d: ShareDest) = _ui.update {
         if (it.busy || (d == ShareDest.SERVER && it.uploadUrl == null)) it else it.copy(dest = d, result = null)
     }
@@ -90,7 +87,7 @@ class ShareViewModel @Inject constructor(
     fun send() {
         val (run, report) = ready() ?: return
         val u = _ui.value
-        if (u.busy || u.count == 0) return
+        if (u.busy) return
         when (u.dest) {
             ShareDest.DOWNLOAD -> job("Downloaded") { list ->
                 status("Saving to Downloads…", null)
@@ -98,12 +95,7 @@ class ShareViewModel @Inject constructor(
                 "Saved ${items(list.size)} to $where"
             }.invoke(run, report)
             ShareDest.EMAIL -> job("Emailed") { list ->
-                val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
-                val note = if (big.isNotEmpty()) {
-                    val where = files.saveToDownloads(big)
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email, so it was saved to $where on the phone."
-                } else null
-                _pendingEmail.value = files.emailIntent(run, report, list - big.toSet(), u.recipients, note)
+                _pendingEmail.value = files.emailIntent(run, report, list, u.recipients)
                 "Opened email to ${u.recipients.joinToString()}"
             }.invoke(run, report)
             ShareDest.SHARE -> job("Shared") { files ->
@@ -155,11 +147,13 @@ class ShareViewModel @Inject constructor(
 
     private fun job(verb: String, deliver: suspend (List<File>) -> String): (RunRecord, TestReport) -> Unit = { run, report ->
         _ui.update { it.copy(busy = true, result = null, failed = false, status = "Preparing…", progress = null) }
-        viewModelScope.launch {
+        running = viewModelScope.launch {
             try {
                 val files = prepare(run, report)
                 val msg = deliver(files)
                 _ui.update { it.copy(busy = false, status = null, progress = null, result = msg, failed = false) }
+            } catch (e: CancellationException) {
+                _ui.update { it.copy(busy = false, status = null, progress = null, result = "Cancelled", failed = false) }
             } catch (e: Exception) {
                 Log.w(TAG, "$verb failed", e)
                 _ui.update { it.copy(busy = false, status = null, progress = null, result = "Failed: ${e.message ?: e.javaClass.simpleName}", failed = true) }
@@ -169,10 +163,9 @@ class ShareViewModel @Inject constructor(
 
     private fun status(s: String, p: Float?) = _ui.update { it.copy(status = s, progress = p) }
 
-    private suspend fun prepare(run: RunRecord, r: TestReport): List<File> {
-        val u = _ui.value
-        return files.prepare(run, r, u.pdf, u.summary, u.zip) { st, p -> status(st, p) }
-    }
+    /** The one export: the report PDF. */
+    private suspend fun prepare(run: RunRecord, @Suppress("UNUSED_PARAMETER") r: TestReport): List<File> =
+        listOf(files.preparePdf(run) { st, p -> status(st, p) })
 
     private companion object {
         const val TAG = "Share"
@@ -183,7 +176,5 @@ class ShareViewModel @Inject constructor(
 
 internal fun mimeOf(f: File): String = when (f.extension.lowercase()) {
     "pdf" -> "application/pdf"
-    "json" -> "application/json"
-    "zip" -> "application/zip"
     else -> "application/octet-stream"
 }

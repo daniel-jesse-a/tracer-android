@@ -102,6 +102,8 @@ data class NewTestSetup(
     /** 0 = no limit */
     val lengthMin: Int = 10,
     val simulate: Boolean = false,
+    /** Report map: the station this run travels to (rail asset), null = the station nearest the last fix. */
+    val destination: String? = null,
 ) {
     val siteOrNull: String? get() = site.trim().takeIf { it.isNotEmpty() }
     val paths: ProbePaths get() = when (networks) { "wifi" -> ProbePaths.WIFI_ONLY; "cellular" -> ProbePaths.CELLULAR_ONLY; else -> ProbePaths.DUAL }
@@ -123,7 +125,12 @@ class PreflightViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val deviceInfo: DeviceInfoProvider,
     private val companion: CompanionLink,
+    private val reportV1: app.tracer.ui.report.ReportV1Service,
 ) : ViewModel() {
+
+    /** Destination choices for the report map (empty when the internal rail asset is not in this build). */
+    val stations: List<String> by lazy { runCatching { reportV1.stations().map { it.name } }.getOrDefault(emptyList()) }
+    fun setDestination(name: String?) = _setup.update { it.copy(destination = name) }
 
     private data class Statics(
         val fine: Boolean, val background: Boolean,
@@ -236,6 +243,13 @@ class PreflightViewModel @Inject constructor(
         )
         // outlives this ViewModel (navigation clears it right after start)
         persistScope.launch { runCatching { settingsRepository.setLastSite(site) } }
+        // the report reads the latest "destination:<station>" annotation of the run (same row on iOS)
+        s.destination?.let { dest ->
+            persistScope.launch {
+                kotlinx.coroutines.withTimeoutOrNull(30_000) { controller.runId.first { it != null } } ?: return@launch
+                controller.markMoment(app.tracer.ui.report.ReportMap.DESTINATION_PREFIX + dest)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ checks

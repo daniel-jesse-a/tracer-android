@@ -7,6 +7,7 @@ import app.tracer.core.report.TestReport
 import app.tracer.core.runtime.RunRepository
 import app.tracer.ui.report.ReportRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -125,39 +126,43 @@ class TestSummaryViewModel @Inject constructor(
         }
     }
 
-    /** Saves report + summary + full data to Downloads/Tracer. */
+    private var running: Job? = null
+    /** Stops building the report. */
+    fun cancelDelivery() { running?.cancel() }
+
+    /** Saves the report PDF to Downloads/Tracer (the only export; the raw run stays in the app). */
     fun download() {
         val ready = state.value as? ReportState.Ready ?: return
         if (_delivery.value.busy) return
-        viewModelScope.launch {
-            _delivery.value = Delivery(busy = true, text = "Saving to Downloads…")
+        running = viewModelScope.launch {
+            _delivery.value = Delivery(busy = true, text = "Making the report…")
             _delivery.value = try {
-                val list = files.prepare(ready.run, ready.report, pdf = true, summary = true, zip = true) { s, _ -> _delivery.value = Delivery(true, s) }
-                val where = files.saveToDownloads(list)
-                Delivery(text = "Saved ${list.size} files to $where")
+                val pdf = files.preparePdf(ready.run) { s, _ -> _delivery.value = Delivery(true, s) }
+                val where = files.saveToDownloads(listOf(pdf))
+                Delivery(text = "Saved ${pdf.name} to $where")
+            } catch (e: CancellationException) {
+                Delivery(text = "Cancelled")
             } catch (e: Exception) {
                 Log.w(TAG, "download failed", e); Delivery(text = "Download failed: ${e.message ?: e.javaClass.simpleName}", failed = true)
             }
         }
     }
 
-    /** Builds the files, keeps a copy in Downloads, and opens the pre-filled email. */
+    /** Builds the report PDF, keeps a copy in Downloads, and opens the pre-filled email with only that PDF attached. */
     fun email(auto: Boolean = false) {
         val ready = state.value as? ReportState.Ready ?: return
         if (_delivery.value.busy) return
-        viewModelScope.launch {
+        running = viewModelScope.launch {
             val to = settings.emailRecipients.first()
             if (to.isEmpty()) { _delivery.value = Delivery(text = "Add email recipients in Settings › Email reports", failed = true); return@launch }
             _delivery.value = Delivery(busy = true, text = if (auto) "Preparing the report email…" else "Preparing email…")
             try {
-                val withZip = settings.emailZip.first()
-                val list = files.prepare(ready.run, ready.report, pdf = true, summary = true, zip = withZip) { s, _ -> _delivery.value = Delivery(true, s) }
-                val where = files.saveToDownloads(list)
-                val big = list.filter { it.extension == "zip" && it.length() > ShareFiles.MAX_EMAIL_BYTES }
-                val note = if (big.isNotEmpty())
-                    "Full data (${big.sumOf { it.length() } / 1_048_576} MB) is too big for email. It is saved on the phone in $where." else null
-                _email.value = files.emailIntent(ready.run, ready.report, list - big.toSet(), to, note)
+                val pdf = files.preparePdf(ready.run) { s, _ -> _delivery.value = Delivery(true, s) }
+                val where = files.saveToDownloads(listOf(pdf))
+                _email.value = files.emailIntent(ready.run, ready.report, listOf(pdf), to)
                 _delivery.value = Delivery(text = "Email to ${to.joinToString()}: tap Send. Copy saved to $where.")
+            } catch (e: CancellationException) {
+                _delivery.value = Delivery(text = "Cancelled")
             } catch (e: Exception) {
                 Log.w(TAG, "email failed", e)
                 _delivery.value = Delivery(text = "Email failed: ${e.message ?: e.javaClass.simpleName}", failed = true)

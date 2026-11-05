@@ -116,6 +116,10 @@ class SettingsRepository @Inject constructor(
     suspend fun setEmailZip(on: Boolean) { store.edit { it[KEY_EMAIL_ZIP] = if (on) "1" else "0" } }
 
     /** Runs whose report email was already opened (so it happens once per test). */
+    /** Report map basemap provider (ReportMap.TILE_PROVIDERS id); "off" = plain background. */
+    val reportTileProvider: Flow<String> = safeData.map { it[KEY_TILE_PROVIDER] ?: app.tracer.ui.report.ReportMap.DEFAULT_PROVIDER }.distinctUntilChanged()
+    suspend fun setReportTileProvider(id: String) { store.edit { it[KEY_TILE_PROVIDER] = id } }
+
     val emailedRuns: Flow<Set<String>> = safeData.map { (it[KEY_EMAILED] ?: "").split(',').filter { s -> s.isNotBlank() }.toSet() }
     suspend fun markEmailed(runId: String) {
         store.edit { p ->
@@ -151,6 +155,7 @@ class SettingsRepository @Inject constructor(
         val KEY_START_COMPANIONS = stringPreferencesKey("ui_start_companions")
         val KEY_WELCOMED = stringPreferencesKey("ui_welcomed")
         val KEY_AUTO_EMAIL = stringPreferencesKey("email_auto")
+        val KEY_TILE_PROVIDER = stringPreferencesKey("report_tile_provider")
         val KEY_EMAIL_TO = stringPreferencesKey("email_to")
         val KEY_EMAIL_ZIP = stringPreferencesKey("email_zip")
         val KEY_EMAILED = stringPreferencesKey("email_done_runs")

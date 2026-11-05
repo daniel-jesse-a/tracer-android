@@ -87,7 +87,7 @@ fun TestSummaryScreen(
     Screen {
         TopLinks(back = "Tests", onBack = onBack, action = "Share", onAction = onShare)
         ReportGate(state) { _, r ->
-            SummaryBody(r, onShare, onDiagnostics, onMoment, delivery, onDownload = vm::download, onEmail = { vm.email() })
+            SummaryBody(r, onShare, onDiagnostics, onMoment, delivery, onDownload = vm::download, onEmail = { vm.email() }, onCancelDelivery = vm::cancelDelivery)
         }
     }
 }
@@ -95,7 +95,7 @@ fun TestSummaryScreen(
 @Composable
 private fun ColumnScope.SummaryBody(
     r: TestReport, onShare: () -> Unit, onDiagnostics: () -> Unit, onMoment: (Int) -> Unit,
-    delivery: Delivery, onDownload: () -> Unit, onEmail: () -> Unit,
+    delivery: Delivery, onDownload: () -> Unit, onEmail: () -> Unit, onCancelDelivery: () -> Unit = {},
 ) {
     Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
         TitleBlock(eyebrow = eyebrowOf(r), title = r.headline)
@@ -197,7 +197,8 @@ private fun ColumnScope.SummaryBody(
                 if (delivery.busy) CircularProgressIndicator(Modifier.size(16.dp), color = tc.link, strokeWidth = 2.dp)
                 else Dot(if (delivery.failed) tc.bad else tc.veryGood, 8.dp)
                 Spacer(Modifier.width(10.dp))
-                Text(dt, style = TType.footnote.copy(fontSize = 14.sp), color = if (delivery.failed) tc.bad else tc.text2)
+                Text(dt, style = TType.footnote.copy(fontSize = 14.sp), color = if (delivery.failed) tc.bad else tc.text2, modifier = Modifier.weight(1f))
+                if (delivery.busy) Text("Cancel", style = TType.label, color = tc.link, modifier = Modifier.clickable(onClick = onCancelDelivery).padding(start = 10.dp))
             }
         }
         Spacer(Modifier.height(24.dp))

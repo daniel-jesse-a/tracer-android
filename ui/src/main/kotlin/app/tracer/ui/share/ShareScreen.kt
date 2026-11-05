@@ -10,13 +10,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -88,12 +86,8 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
         TopLinks(back = "Cancel", onBack = onCancel, title = "Share", backIsCancel = true)
         ReportGate(state) { _, r ->
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                TitleBlock(eyebrow = r.title, title = "What to send")
-                SendItem(Icons.Outlined.Description, "Report", "PDF · for anyone", ui.pdf, vm::togglePdf)
-                Spacer(Modifier.height(K.gap))
-                SendItem(Icons.Outlined.BarChart, "Summary", "Compare tests", ui.summary, vm::toggleSummary)
-                Spacer(Modifier.height(K.gap))
-                SendItem(Icons.Outlined.Inventory2, "Full data", "ZIP · for engineers", ui.zip, vm::toggleZip)
+                TitleBlock(eyebrow = r.title, title = "Send the report")
+                ReportItem()
                 Caption("Send to")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap)) {
                     DestCard(Icons.Outlined.Download, "Download", ui.dest == ShareDest.DOWNLOAD, true, Modifier.weight(1f)) { vm.setDest(ShareDest.DOWNLOAD) }
@@ -128,6 +122,8 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 if (p != null) LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = tc.link, trackColor = tc.card2)
                 else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = tc.link, trackColor = tc.card2)
                 Spacer(Modifier.height(12.dp))
+                Pill("Cancel", onClick = vm::cancel, modifier = Modifier.fillMaxWidth(), kind = PillKind.SECONDARY_BLUE)
+                Spacer(Modifier.height(12.dp))
             } else if (result != null) {
                 Text(result, style = TType.sub, color = if (ui.failed) tc.bad else tc.veryGood, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
@@ -136,11 +132,10 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
                 ShareDest.DOWNLOAD -> "Download"; ShareDest.EMAIL -> "Email"
                 ShareDest.SHARE -> "Share"; ShareDest.FILES -> "Save"; ShareDest.SERVER -> "Send"
             }
-            val n = ui.count
             Pill(
-                "$verb $n ${if (n == 1) "item" else "items"}",
+                "$verb report",
                 onClick = { if (ui.dest == ShareDest.FILES) pickFolder.launch(null) else vm.send() },
-                modifier = Modifier.fillMaxWidth(), kind = PillKind.BLUE, enabled = n > 0 && !ui.busy,
+                modifier = Modifier.fillMaxWidth(), kind = PillKind.BLUE, enabled = !ui.busy,
             )
             Spacer(Modifier.height(16.dp))
             Spacer(Modifier.navigationBarsPadding())
@@ -148,17 +143,17 @@ fun ShareScreen(runId: String, onCancel: () -> Unit) {
     }
 }
 
+/** The one thing that is sent: the Tracer report v1 PDF. The raw run stays on the phone. */
 @Composable
-private fun SendItem(icon: ImageVector, title: String, sub: String, selected: Boolean, onClick: () -> Unit) {
-    SelectCard(selected, onClick, Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconWell(icon, tint = if (selected) tc.link else tc.text2, bg = if (selected) tc.linkBg else tc.card2)
+private fun ReportItem() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconWell(Icons.Outlined.Description, tint = tc.link, bg = tc.linkBg)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, style = TType.headline.copy(fontSize = 19.sp), color = tc.text)
-                Text(sub, style = TType.sub.copy(fontSize = 16.sp), color = tc.text3)
+                Text("Network test report", style = TType.headline.copy(fontSize = 19.sp), color = tc.text)
+                Text("PDF, A4 landscape. Raw data stays on this phone.", style = TType.sub.copy(fontSize = 16.sp), color = tc.text3)
             }
-            CheckCircle(selected)
         }
     }
 }

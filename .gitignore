@@ -12,3 +12,8 @@
 *.aab
 *.keystore
 !app/debug.keystore
+
+# Etihad Rail ERGT track/stations: internal data, never committed (CI writes it from the RAIL_ERGT_JSON_B64 secret)
+ui/src/main/assets/report/rail_ergt.json
+# real-run report fixture (internal); drop the 95596452 bundle here locally to run the acceptance test
+ui/src/test/resources/report-v1/95596452/
